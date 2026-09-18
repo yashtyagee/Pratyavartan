@@ -36,6 +36,9 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     Foreign key enforcement guarantees data integrity across audit logs and payments.
     """
     target_path = db_path or DB_PATH
+    db_dir = os.path.dirname(target_path)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     conn = sqlite3.connect(target_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")

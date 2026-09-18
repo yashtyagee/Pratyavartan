@@ -1,4 +1,7 @@
 services:
+  # ==========================================
+  # 1. BACKEND: FastAPI War Room (The Brain)
+  # ==========================================
   revive:
     build: .
     container_name: revive-war-room
@@ -6,25 +9,67 @@ services:
       - "8010:8010"
     environment:
       - PORT=8010
+      - DATABASE_PATH=/app/data/revenue_recovery.db
+      - N8N_WEBHOOK_URL=http://n8n:5678/webhook/promise-to-pay-trigger
     env_file:
       - path: .env
         required: false
+    volumes:
+      # CRITICAL: Isolate database and audio files so container rebuilds always pick up latest app code
+      - db_data:/app/data
+      - audio_data:/app/audio
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8010/health')"]
-      interval: 15s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 5s
     restart: unless-stopped
 
+  # ==========================================
+  # 2. FRONTEND: Next.js Landing Page
+  # ==========================================
   site:
     build:
       context: ./revive-site
       args:
+        # Browser ke liye localhost theek hai, kyunki judge localhost:3000 khol raha hoga
         NEXT_PUBLIC_CONSOLE_URL: http://localhost:8010
         NEXT_PUBLIC_API_DOCS_URL: http://localhost:8010/docs
-    ports: ["3000:3000"]
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8010/api
+    container_name: revive-site
+    ports: 
+      - "3000:3000"
+    depends_on:
+      revive:
+        condition: service_healthy # Backend healthy hone ka wait karega
+    restart: unless-stopped
+
+  # ==========================================
+  # 3. WORKFLOW: n8n (The Hands - Paytm Partner Tech)
+  # ==========================================
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: revive-n8n
+    ports:
+      - "5672:5678" # 5678 se 5672 kar diya taaki kisi local port se clash na ho
+    environment:
+      - N8N_ENFORCE_SUBDOMAIN_COOKIE=false
+      - WEBHOOK_URL=http://localhost:5672/
+      - FASTAPI_BASE_URL=http://revive:8010 # Internal Docker network address for backend
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+    volumes:
+      - n8n_data:/home/node/.n8n
     depends_on:
       revive:
         condition: service_healthy
     restart: unless-stopped
+
+# ==========================================
+# VOLUMES: Data ko persistent (zinda) rakho
+# ==========================================
+volumes:
+  db_data:
+  audio_data:
+  n8n_data:
