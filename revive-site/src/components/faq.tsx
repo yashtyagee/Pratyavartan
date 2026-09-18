@@ -5,8 +5,8 @@ import { useState } from "react";
 const FAQS = [
   {
     q: "What is Pratyavartan?",
-    a: "An autonomous payment-recovery agent. It ingests HMAC-verified failure webhooks, diagnoses the root cause, picks the highest-probability recovery action, executes it, and writes every step to a hash-chained audit ledger. You watch it in the live Console.",
-    key: "autonomous",
+    a: "Your Paytm Merchant's AI Teammate (Digital Employee #AI-001). It ingests HMAC-verified failure webhooks, diagnoses Kirana QR and retail payment failures, picks the highest-probability recovery action, executes it, and writes every step to a hash-chained audit ledger.",
+    key: "AI Teammate",
   },
   {
     q: "Is the AI unrestricted?",

@@ -49,9 +49,9 @@ export default function AgentSection() {
   return (
     <section ref={root} className="relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-28">
       <div className="text-center">
-        <p className="mono text-xs uppercase tracking-[0.3em] text-body/40">The agent</p>
+        <p className="mono text-xs uppercase tracking-[0.3em] text-body/40">The AI Teammate</p>
         <h2 className="font-display mt-4 text-5xl font-bold tracking-tight md:text-6xl">
-          Meet the <span className="serif-it grad-text-teal">recovery agent.</span>
+          Meet your Merchant's <span className="serif-it grad-text-teal">AI Teammate (#AI-001)</span>
         </h2>
 
         <div className="relative mx-auto mt-20 aspect-square w-full max-w-xl">

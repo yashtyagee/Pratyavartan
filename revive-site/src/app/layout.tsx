@@ -7,9 +7,9 @@ import "@fontsource/jetbrains-mono/400.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "प्रत्यावर्तन — Autonomous AI Payment Recovery Agent",
+  title: "प्रत्यावर्तन — Your Paytm Merchant's AI Teammate (Digital Employee #AI-001)",
   description:
-    "Pratyavartan understands why a payment failed, decides what should happen next, and autonomously executes the highest-probability recovery — inside bounded, audited guardrails.",
+    "Pratyavartan is the Digital Employee #AI-001 for Kirana and retail merchants. It understands why a payment failed, decides what should happen next, and autonomously executes the highest-probability recovery — inside bounded, audited guardrails.",
 };
 
 export default function RootLayout({

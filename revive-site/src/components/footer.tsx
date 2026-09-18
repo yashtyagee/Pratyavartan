@@ -4,8 +4,8 @@ const COLUMNS: { title: string; links: { label: string; href: string; external?:
   {
     title: "PRODUCT",
     links: [
-      { label: "Recovery Agent", href: "#how-it-works" },
-      { label: "Diagnosis Engine", href: "#intelligence" },
+      { label: "AI Teammate (#AI-001)", href: "#how-it-works" },
+      { label: "Decision Core", href: "#intelligence" },
       { label: "Guardrails", href: "#recovery" },
       { label: "Live War Room", href: CONSOLE_URL, external: true },
     ],
@@ -49,7 +49,7 @@ export default function Footer() {
             <span className="font-display text-sm tracking-[0.22em] text-white">PRAVART</span>
           </p>
           <p className="mt-4 max-w-xs text-sm leading-relaxed text-body/50">
-            Autonomous AI payment recovery. Bounded by policy, proven by a hash-chained audit ledger.
+            Your Paytm Merchant's AI Teammate (Digital Employee #AI-001). Bounded by policy, proven by a hash-chained audit ledger.
           </p>
         </div>
         {COLUMNS.map((c) => (

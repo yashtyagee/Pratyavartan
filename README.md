@@ -1,7 +1,7 @@
 <div align="center">
 
 # 🛡️ Pratyavartan (प्रत्यावर्तन)
-### Autonomous, Compliance-First AI Revenue Recovery Engine for Razorpay
+### Your Paytm Merchant's AI Teammate (Digital Employee #AI-001)
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Next.js%2016-black?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org)
@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 
 <p align="center">
-  <b>Recover 30%+ of dropped e-commerce revenue autonomously — without breaking RBI compliance or annoying customers.</b>
+  <b>Your Paytm Merchant's AI Teammate (Digital Employee #AI-001) — Recover failed Kirana QR payments (e.g. ₹500) and retail transactions autonomously with zero friction and 100% RBI compliance.</b>
 </p>
 
 [🌐 Live Landing Page](https://pratyavartan.vercel.app) • [⚡ Live Merchant War Room](#-live-demo) • [📚 API Documentation](#-api-endpoints)
@@ -20,26 +20,31 @@
 
 ---
 
-## ⚡ The Problem: India's ₹1.2 Lakh Crore Payment Leakage
+## ⚡ The Problem: Kirana & Retail Payment Leakage at the Counter
 
-In Indian e-commerce, **over 32% of transactions fail at the checkout edge**:
+In Indian Kirana stores and retail counters, **millions of QR scan transactions fail at the checkout edge**:
 
-| Failure Category | What Happens | Business Impact |
+| Failure Category | What Happens | Business Impact for Kirana Merchants |
 |---|---|---|
-| **UPI Limit / Insufficient Funds** | Customer's UPI app rejects the payment; they abandon the cart | Lost sale, no recovery attempt |
-| **Bank Gateway Downtime** | Acquiring bank is offline; generic bots spam the customer anyway | Brand trust destroyed, RBI violation risk |
-| **Cart Drop / Session Timeout** | Customer gets distracted mid-checkout | Revenue evaporates within minutes |
-| **Manual Escalation Overhead** | Support teams manually review failed payments | Hours wasted, delayed recovery |
+| **Kirana QR Scan Failure (e.g. ₹500)** | Dynamic QR scan times out or fails mid-transaction | Customer walks away, counter bottleneck, lost revenue |
+| **Insufficient Balance / UPI Daily Limit** | Customer bank rejects UPI at checkout counter | Embarrassing failure, merchant loses sale |
+| **Bank Gateway Downtime** | Acquiring bank server offline; dumb bots spam customers | Brand trust destroyed, RBI compliance risk |
+| **Manual Escalation Overhead** | Merchants manually chase pending QR debits | Hours lost, friction with local patrons |
 
-**Merchants lose revenue. Customers get harassed. Nobody wins.**
+**Merchants lose revenue. Customers get frustrated. Nobody wins.**
 
 ---
 
-## 💡 The Solution: Pratyavartan
+## 💡 The Solution: Pratyavartan — Digital Employee #AI-001
 
-**Pratyavartan** *(Sanskrit: प्रत्यावर्तन — "Return / Reclamation")* is an **autonomous, self-healing revenue recovery engine** built natively on the **Razorpay API ecosystem**.
+**Pratyavartan** *(Sanskrit: प्रत्यावर्तन — "Return / Reclamation")* is your **Paytm Merchant's AI Teammate (Digital Employee #AI-001)** built natively for the **Razorpay API ecosystem**.
 
-It listens to real-time payment failure streams, diagnoses root causes with a **strict-JSON AI brain**, dispatches self-healing payment channels (Zero-UI UPI Intent & 1-Click Instrument Switching), and records every autonomous decision in an **immutable, cryptographically hash-chained audit ledger** — all while strictly respecting **RBI anti-harassment guidelines**.
+It acts as an autonomous digital staff member:
+1. **Instantly detects failed Kirana QR & online payments** via HMAC-SHA256 verified webhooks.
+2. **Diagnoses root causes with bounded AI reasoning** (Bank Downtime vs Insufficient Balance vs QR Scan Failure).
+3. **Dispatches 1-Click zero-friction recovery links & Hinglish voice notes** directly to the customer.
+4. **Maintains a Bulletproof Reliability Fallback Safety Net**: Seamlessly fails over from Sarvam AI to gTTS, and Cognee to SQLite WAL ledger.
+5. **Records every autonomous decision in a cryptographic SHA-256 hash-chained audit ledger** while strictly enforcing **RBI anti-harassment stopping rules**.
 
 ---
 
@@ -231,8 +236,8 @@ The Merchant Command Center includes a built-in **Live Simulation Engine** for r
 
 | Scenario | Simulated Failure Code | Expected AI Response |
 |---|---|---|
-| **🔴 Test UPI Limit** | `PAYMENT_UPI_LIMIT_EXCEEDED` | `SWITCH_INSTRUMENT` → 1-click Card/EMI recovery link, **zero discount** |
-| **🟡 Test Dropped Cart** | `CHECKOUT_INCOMPLETE` | `SEND_UPI_INTENT` → Zero-UI UPI deep link with **tiered discount** |
+| **🔴 Test Insufficient Balance (Kirana)** | `PAYMENT_UPI_LIMIT_EXCEEDED` / `INSUFFICIENT_BALANCE` | `SWITCH_INSTRUMENT` → 1-click Card/EMI recovery link or UPI intent, **zero discount** |
+| **🟡 Test QR Scan Failed** | `QR_SCAN_FAILED` (₹500 Kirana QR) | `SEND_UPI_INTENT` → Zero-UI 1-click recovery deep link with instant closure |
 | **🟠 Test Bank Down** | `GATEWAY_TIMEOUT` | `WAIT_AND_MONITOR` → Silent hold, **no customer outreach** |
 | **🔵 Test Max Retries** | Payment with `retry_count >= 2` | `ESCALATE_HUMAN` → AI aborts, logs `STOPPING_RULE_TRIGGERED` |
 

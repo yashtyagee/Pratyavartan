@@ -67,8 +67,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AI Revenue Command Center",
-    description="Compliance-First Autonomous Revenue Recovery Engine with Dynamic Discounts & Voice Negotiation",
+    title="Pratyavartan: Your Paytm Merchant's AI Teammate",
+    description="Digital Employee #AI-001 • Autonomous Kirana & Retail Payment Recovery with Dynamic Discounts & Voice Negotiation",
     version="1.2.0",
     lifespan=lifespan,
 )
@@ -1111,6 +1111,22 @@ async def promise_to_pay(request: Request) -> JSONResponse:
         severity="INFO",
     )
 
+    # Dispatch to n8n autonomous execution layer (with automatic internal fallback)
+    await orchestrator.async_dispatch_to_n8n(
+        payload={
+            "workflow_type": "promise_to_pay_orchestrator",
+            "promise_id": promise_id,
+            "payment_id": payment_id,
+            "remind_at": promised_at_str,
+            "promised_at": promised_at_str,
+            "followup_after": followup_after_str,
+            "clamped": clamped,
+            "mode": mode,
+            "correlation_id": correlation_id,
+        },
+        correlation_id=correlation_id,
+    )
+
     return JSONResponse(
         status_code=201,
         content={
@@ -1122,6 +1138,338 @@ async def promise_to_pay(request: Request) -> JSONResponse:
             "clamped": clamped,
             "reasoning": reasoning,
         },
+    )
+
+
+# =========================================================================
+# n8n Autonomous Workflow Integration Endpoints
+# =========================================================================
+
+@app.get("/api/payment/{payment_id}/status")
+def get_payment_status(payment_id: str) -> JSONResponse:
+    """
+    Returns real-time payment status for n8n orchestrator polling/decision nodes.
+    """
+    payment = db.get_payment(payment_id)
+    if not payment:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": f"Payment {payment_id} not found"},
+        )
+    return JSONResponse(
+        content={
+            "payment_id": payment["payment_id"],
+            "status": payment["status"],
+            "amount": payment["amount"],
+            "currency": payment.get("currency", "INR"),
+            "retry_count": payment.get("retry_count", 0),
+            "error_code": payment.get("error_code"),
+        }
+    )
+
+
+class LogPromiseKeptRequest(BaseModel):
+    payment_id: str
+    promise_id: Optional[int] = None
+    correlation_id: Optional[str] = None
+
+
+@app.post("/api/log-promise-kept")
+async def api_log_promise_kept(req: LogPromiseKeptRequest) -> JSONResponse:
+    """
+    Records a promise as KEPT and appends an immutable hash-chained audit event.
+    Invoked by n8n or internal webhook.
+    """
+    import memory
+    cid = req.correlation_id or str(uuid.uuid4())
+    pid = req.payment_id
+    payment = db.get_payment(pid)
+    contact = payment.get("user_contact") if payment else pid
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        if req.promise_id:
+            cursor.execute(
+                "UPDATE promises SET status='kept' WHERE id=? AND status IN ('pending','followed_up')",
+                (req.promise_id,),
+            )
+        else:
+            cursor.execute(
+                "UPDATE promises SET status='kept' WHERE payment_id=? AND status IN ('pending','followed_up')",
+                (pid,),
+            )
+        resolved = cursor.rowcount
+        conn.commit()
+
+    memory.remember_customer_context(
+        customer_ref=contact,
+        interaction_data={"event": "PROMISE_KEPT", "payment_id": pid, "promise_id": req.promise_id},
+        correlation_id=cid,
+    )
+
+    db.log_event(
+        correlation_id=cid,
+        payment_id=pid,
+        event_type="PROMISE_KEPT",
+        payload={
+            "promise_id": req.promise_id,
+            "resolved_count": resolved,
+            "source": "n8n_execution_layer",
+        },
+        reasoning=f"Promise resolved as KEPT via n8n autonomous execution layer for {pid}.",
+        severity="INFO",
+    )
+    return JSONResponse(content={"status": "ok", "payment_id": pid, "resolved_count": resolved})
+
+
+class TriggerVoiceReminderRequest(BaseModel):
+    payment_id: str
+    promise_id: Optional[int] = None
+    script: Optional[str] = None
+    correlation_id: Optional[str] = None
+
+
+@app.post("/api/trigger-voice-reminder")
+async def api_trigger_voice_reminder(req: TriggerVoiceReminderRequest) -> JSONResponse:
+    """
+    Dispatches voice reminder and logs PROMISE_FOLLOWUP + MESSAGE_SENT audit events via n8n.
+    """
+    cid = req.correlation_id or str(uuid.uuid4())
+    pid = req.payment_id
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        if req.promise_id:
+            cursor.execute(
+                "UPDATE promises SET status='followed_up' WHERE id=? AND status='pending'",
+                (req.promise_id,),
+            )
+        else:
+            cursor.execute(
+                "UPDATE promises SET status='followed_up' WHERE payment_id=? AND status='pending'",
+                (pid,),
+            )
+        conn.commit()
+
+    payment_link, link_source = orchestrator._resolve_payment_link(pid)
+    reminder_script = req.script or "Bhaiya, aapka payment link abhi bhi active hai. Kripya tap karke payment complete karein."
+    audio_url = ""
+    try:
+        import voice_engine
+        audio_url = voice_engine.generate_hinglish_voice(
+            script=reminder_script,
+            payment_id=pid,
+            correlation_id=cid,
+        )
+    except Exception as voice_err:
+        logger.warning("Voice reminder generation error for %s: %s", pid, voice_err)
+
+    db.log_event(
+        correlation_id=cid,
+        payment_id=pid,
+        event_type="PROMISE_FOLLOWUP",
+        payload={
+            "promise_id": req.promise_id,
+            "payment_id": pid,
+            "source": "n8n_execution_layer",
+        },
+        reasoning=f"Promise follow-up triggered via n8n autonomous execution layer for {pid}.",
+        severity="INFO",
+    )
+
+    db.log_event(
+        correlation_id=cid,
+        payment_id=pid,
+        event_type="MESSAGE_SENT",
+        payload={
+            "script": reminder_script,
+            "audio_url": audio_url,
+            "payment_link": payment_link or "",
+            "link_source": link_source,
+            "channel": "Voice/WhatsApp",
+            "source": "n8n_execution_layer",
+        },
+        reasoning="Promise follow-up reminder dispatched via n8n execution layer.",
+        severity="INFO",
+    )
+
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "payment_id": pid,
+            "audio_url": audio_url,
+            "payment_link": payment_link,
+        }
+    )
+
+
+class EscalateHumanRequest(BaseModel):
+    payment_id: str
+    reason: Optional[str] = None
+    correlation_id: Optional[str] = None
+
+
+@app.post("/api/escalate-human")
+async def api_escalate_human(req: EscalateHumanRequest) -> JSONResponse:
+    """
+    Escalates payment to human compliance review and updates payment status to ESCALATED.
+    """
+    import memory
+    cid = req.correlation_id or str(uuid.uuid4())
+    pid = req.payment_id
+    reason = req.reason or "Autonomous recovery sequence exhausted — escalated to human review per bounded policy."
+    payment = db.get_payment(pid)
+    contact = payment.get("user_contact") if payment else pid
+
+    db.update_payment_status(pid, "ESCALATED")
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE promises SET status='broken' WHERE payment_id=? AND status IN ('pending','followed_up')",
+            (pid,),
+        )
+        conn.commit()
+
+    memory.remember_customer_context(
+        customer_ref=contact,
+        interaction_data={"event": "ESCALATED", "payment_id": pid, "reason": reason},
+        correlation_id=cid,
+    )
+
+    db.log_event(
+        correlation_id=cid,
+        payment_id=pid,
+        event_type="ESCALATE_HUMAN",
+        payload={
+            "payment_id": pid,
+            "reason": reason,
+            "status": "ESCALATED",
+            "source": "n8n_execution_layer",
+        },
+        reasoning=reason,
+        severity="CRITICAL",
+    )
+
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "payment_id": pid,
+            "payment_status": "ESCALATED",
+            "reason": reason,
+        }
+    )
+
+
+@app.get("/api/customer-memory/{payment_id}")
+def get_customer_memory(payment_id: str) -> JSONResponse:
+    """
+    Returns long-term customer memory recalled from Cognee / SQLite for UI display in Decision Trace.
+    """
+    import memory
+    payment = db.get_payment(payment_id)
+    contact = payment.get("user_contact") if payment else payment_id
+    ctx = memory.recall_customer_context(contact)
+    return JSONResponse(content=ctx)
+
+
+@app.get("/api/voice-status")
+def get_voice_status() -> JSONResponse:
+    """
+    Returns the real-time operational status of Sarvam Voice Engine and gTTS fallback.
+    """
+    import voice_engine
+    return JSONResponse(content=voice_engine.get_voice_engine_status())
+
+
+
+class MandateAttemptRequest(BaseModel):
+    payment_id: str
+    attempt_no: int = 1
+    correlation_id: Optional[str] = None
+
+
+@app.post("/api/mandates/attempt")
+async def api_mandates_attempt(req: MandateAttemptRequest) -> JSONResponse:
+    """
+    Executes a specific mandate retry attempt (invoked by n8n workflow or manual override).
+    """
+    cid = req.correlation_id or str(uuid.uuid4())
+    pid = req.payment_id
+    att_no = req.attempt_no
+
+    payment = db.get_payment(pid)
+    if not payment:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Payment not found"})
+
+    if payment.get("status") == "RECOVERED":
+        return JSONResponse(content={"status": "cancelled", "message": "Payment already recovered"})
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE mandate_schedule SET status='fired' WHERE payment_id=? AND attempt_no=?",
+            (pid, att_no),
+        )
+        conn.commit()
+
+    payment_link, link_source = orchestrator._resolve_payment_link(pid)
+    if not payment_link:
+        payment_link = f"https://rzp.io/i/plink_mnd_{pid[-8:] if len(pid)>=8 else pid}"
+        link_source = "fallback"
+
+    script = (
+        f"Namaste! Aapka mandate autopay attempt {att_no} complete nahi ho paya. "
+        f"Kripya diye gaye link se 1-click payment complete karein."
+    )
+    audio_url = ""
+    try:
+        audio_url = razorpay_service.generate_voice_audio(
+            script=script,
+            payment_id=pid,
+            correlation_id=cid,
+        )
+    except Exception as voice_err:
+        logger.warning("Mandate voice generation error for %s: %s", pid, voice_err)
+
+    db.log_event(
+        correlation_id=cid,
+        payment_id=pid,
+        event_type="MANDATE_ATTEMPT",
+        payload={
+            "attempt_no": att_no,
+            "payment_link": payment_link,
+            "audio_url": audio_url,
+            "link_source": link_source,
+            "source": "n8n_execution_layer",
+        },
+        reasoning=f"Mandate debit attempt {att_no} executed via n8n execution layer.",
+        severity="INFO",
+    )
+
+    db.log_event(
+        correlation_id=cid,
+        payment_id=pid,
+        event_type="MESSAGE_SENT",
+        payload={
+            "channel": "SMS/WhatsApp",
+            "link": payment_link,
+            "audio_url": audio_url,
+            "mandate_attempt": att_no,
+            "source": "n8n_execution_layer",
+        },
+        reasoning=f"Mandate debit retry notice {att_no} dispatched via n8n execution layer.",
+        severity="INFO",
+    )
+
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "payment_id": pid,
+            "attempt_no": att_no,
+            "payment_link": payment_link,
+            "audio_url": audio_url,
+        }
     )
 
 
@@ -1143,4 +1491,5 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8010))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+
 

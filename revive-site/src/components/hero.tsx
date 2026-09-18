@@ -150,15 +150,14 @@ export default function Hero() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_40%,#1a1a1a_88%)]" />
 
       <div className="relative z-10 mx-auto w-full max-w-7xl px-6 pb-24 pt-36 text-center">
-        <p className="mono mb-6 text-xs uppercase tracking-[0.3em] text-teal">Autonomous revenue recovery</p>
+        <p className="mono mb-6 text-xs uppercase tracking-[0.3em] text-teal">Digital Employee #AI-001 · Kirana Merchant AI Teammate</p>
         <h1 className="font-display mx-auto max-w-4xl text-5xl font-bold leading-[1.04] tracking-tight text-white md:text-7xl">
           <Scramble text="Payment failures aren’t the end." />
           <br />
           <span className="serif-it grad-text-teal"><WeightWord text="They’re decisions." /></span>
         </h1>
         <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-body/70">
-          Pratyavartan understands why a payment failed, decides what should happen next, and autonomously executes the
-          highest-probability recovery — inside bounded, audited guardrails.
+          Pratyavartan is the Digital Employee #AI-001 for merchants. It understands why a Kirana QR payment failed, decides what should happen next, and autonomously executes the highest-probability recovery — inside bounded, audited guardrails.
         </p>
 
         <div className="mt-10 flex flex-wrap items-center justify-center gap-4">

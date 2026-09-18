@@ -61,7 +61,7 @@ export default function RecoveryStrategy() {
         Four paths. One <span className="serif-it grad-text">highest probability.</span>
       </h2>
       <p className="mt-4 max-w-xl text-sm italic text-copper/80">
-        Probabilities shown are illustrative of the scoring model — the agent computes them per transaction at decision time.
+        Probabilities shown are illustrative of the scoring model — the AI Teammate (#AI-001) computes them per transaction at decision time.
       </p>
 
       <ul className="mt-14 space-y-5" aria-label="Recovery action probabilities">
@@ -90,7 +90,7 @@ export default function RecoveryStrategy() {
         <div>
           <p className="mono text-xs tracking-widest text-body/40">SELECTED ACTION</p>
           <p className="serif-it mt-2 text-3xl text-copper">Generate Card/EMI payment link</p>
-          <p className="mt-2 text-sm text-body/55">Full amount preserved · zero discount · no cart rebuild.</p>
+          <p className="mt-2 text-sm text-body/55">Full amount preserved · zero discount · instant 1-tap Kirana payment.</p>
         </div>
         <div className="text-right">
           <p className="mono text-xs tracking-widest text-body/40">CONFIDENCE</p>

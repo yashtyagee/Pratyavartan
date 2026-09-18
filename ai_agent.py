@@ -159,17 +159,17 @@ class AIDiagnosis(BaseModel):
 
 # System Prompt optimized for Llama 3.3 70B and OpenAI models with strict schema definitions
 SYSTEM_PROMPT = """
-You are Razorpay's AI Revenue Recovery Agent. You diagnose payment failures and prescribe bounded recovery actions.
+You are Pratyavartan: The Paytm Merchant's AI Teammate (Digital Employee #AI-001). You diagnose Kirana store dynamic QR and retail payment failures, and prescribe bounded recovery actions.
 
 DIAGNOSIS AND ACTION TAXONOMY:
 1. BANK_DOWN: error contains 'gateway', 'timeout', 'bank_decline', 'network', 'server_error'
    → action: WAIT_AND_MONITOR (bank issue resolves itself)
    → scenario: BANK_DOWN
-2. CART_DROP: error contains 'abandoned', 'session_timeout', 'user_cancelled', 'browser_closed', 'checkout_incomplete'
-   → action: SEND_UPI_INTENT (Zero-UI deep link bypasses web checkout)
+2. CART_DROP: error contains 'abandoned', 'session_timeout', 'user_cancelled', 'browser_closed', 'checkout_incomplete', 'qr_scan_failed', 'qr_timeout'
+   → action: SEND_UPI_INTENT (Zero-UI deep link bypasses broken checkout)
    → scenario: CART_ABANDONMENT
 3. LOW_BALANCE: error contains 'insufficient', 'limit_exceeded', 'daily_limit', 'upi_limit', 'balance'
-   → action: SWITCH_INSTRUMENT (disable UPI, offer Card/EMI/PayLater)
+   → action: SWITCH_INSTRUMENT (disable failing UPI, offer Card/EMI/PayLater link)
    → scenario: UPI_LIMIT (if daily limit reached) OR INSUFFICIENT_BALANCE (if low account balance)
 4. UNKNOWN: anything else
    → action: ESCALATE_HUMAN
@@ -190,14 +190,14 @@ Return ONLY raw valid JSON. Do not include markdown code blocks, backticks, prea
 """
 
 VOICE_PROMPT = """
-You are a warm, courteous Indian customer-support executive assisting a customer whose online payment failed.
-Generate a concise, natural Hinglish (Hindi + English) voice message for automated IVR/WhatsApp voice outreach.
+You are a warm, courteous Indian customer-support executive representing the merchant's AI Teammate (Digital Employee #AI-001).
+Generate a concise, natural Hinglish (Hindi + English) voice message for automated Kirana store QR payment recovery.
 
 REQUIREMENTS:
 1. Speak in polite, reassuring Hinglish.
 2. Max 35 words.
-3. Mention the customer's name, the original amount, the special retention discount applied, and the final discounted amount.
-4. Add a gentle call-to-action asking them to tap the recovery link immediately.
+3. Mention the customer's name, the original amount (e.g. Rs. 500), any instant merchant incentive applied, and the final amount.
+4. Add a gentle call-to-action asking them to tap the 1-click recovery link immediately.
 5. Return ONLY the spoken text string without quotes, formatting, or prefixes.
 """
 
@@ -208,7 +208,7 @@ def map_scenario(error_code: str = "", reasoning: str = "") -> str:
     IN THIS EXACT ORDER (first match wins):
     1. "limit" → UPI_LIMIT
     2. "insufficient" OR "balance" → INSUFFICIENT_BALANCE
-    3. "cart" OR "abandon" → CART_ABANDONMENT
+    3. "qr" OR "scan" OR "cart" OR "abandon" → CART_ABANDONMENT
     4. "mandate" OR "autopay" → MANDATE_FAIL
     5. "bank" OR "gateway" → BANK_DOWN
     else → UNKNOWN.
@@ -220,7 +220,7 @@ def map_scenario(error_code: str = "", reasoning: str = "") -> str:
         return "UPI_LIMIT"
     if "insufficient" in combined or "balance" in combined:
         return "INSUFFICIENT_BALANCE"
-    if "cart" in combined or "abandon" in combined:
+    if "qr" in combined or "scan" in combined or "cart" in combined or "abandon" in combined:
         return "CART_ABANDONMENT"
     if "mandate" in combined or "autopay" in combined:
         return "MANDATE_FAIL"
@@ -285,7 +285,7 @@ def resolve_scenario_and_methods(
                 ["upi", "card", "emi", "netbanking"],
                 uri,
                 "SEND_UPI_INTENT",
-                reasoning or "Cart drop identified. Dispatching zero-UI UPI deep link.",
+                reasoning or "Kirana QR scan payment failure identified. Dispatching 1-click zero-friction recovery deep link.",
             )
         elif scenario == "BANK_DOWN":
             return (
@@ -449,18 +449,18 @@ def generate_voice_script(
 
     if diagnosis == "LOW_BALANCE" and lb_scenario == "UPI_LIMIT":
         fallback_script = (
-            "Sir, aapki UPI daily limit ho gayi thi, isliye Card aur EMI ka one-click link bheja hai. "
-            "Bina cart dobara banaye payment complete kijiye!"
+            "Sir, aapki dukaan pe QR payment ki daily UPI limit exceed ho gayi thi, isliye Card aur alternate payment link bheja hai. "
+            "Kripya diye gaye link se turant payment complete kijiye!"
         )
     elif diagnosis == "LOW_BALANCE":
         fallback_script = (
-            "Bhaiya, balance kam tha toh koi baat nahi — ab UPI se 1-click pay kar sakte hain. "
-            "Card aur EMI bhi available hai!"
+            "Bhaiya, account balance kam hone se dukaan ka QR payment ruk gaya tha. "
+            "Abhi 1-click UPI intent link se pay karein ya Card/EMI use karein!"
         )
     else:
         fallback_script = (
-            f"Namaste {customer_name}! Aapka payment complete nahi ho paya tha. "
-            f"Aapke liye special discount apply karke final amount sirf rupees {final_inr:,.2f} hai. "
+            f"Namaste {customer_name}! Kirana store pe aapka payment complete nahi ho paya tha. "
+            f"Aapke liye instant recovery link bheja hai (amount: rupees {final_inr:,.2f}). "
             f"Kripya diye gaye link se turant complete karein!"
         )
 
@@ -469,22 +469,22 @@ def generate_voice_script(
         try:
             if diagnosis == "LOW_BALANCE" and lb_scenario == "UPI_LIMIT":
                 low_balance_prompt = (
-                    "You are a warm, courteous Indian customer-support executive assisting a customer whose UPI payment failed due to daily bank/UPI limit.\n"
+                    "You are a warm, courteous Indian customer-support executive representing the merchant's AI Teammate (Digital Employee #AI-001) assisting a customer whose Kirana store QR payment failed due to daily bank/UPI limit.\n"
                     "Generate a concise, natural Hinglish voice message (max 30 words).\n"
-                    "State that their UPI daily limit was reached, and we have sent a 1-click Card/EMI recovery link so they do NOT need to rebuild their cart.\n"
+                    "State that their UPI daily limit was reached at the Kirana store, and we have sent a 1-click Card/EMI recovery link so they can complete the purchase instantly.\n"
                     "Do NOT mention any discounts or price reductions.\n"
                     "Return ONLY the spoken text string without quotes, formatting, or prefixes."
                 )
                 user_msg = (
                     f"Customer Name: {customer_name}\n"
                     f"Original Amount: Rs.{original_inr:,.2f}\n"
-                    f"Failure Reason: UPI Limit Exceeded\n"
-                    f"Alternative Method: Card / EMI One-Click Link (No cart rebuild required)"
+                    f"Failure Reason: UPI Limit Exceeded at Kirana QR\n"
+                    f"Alternative Method: Card / EMI One-Click Link (Instant merchant settlement)"
                 )
                 system_p = low_balance_prompt
             elif diagnosis == "LOW_BALANCE":
                 insufficient_prompt = (
-                    "You are a warm, courteous Indian customer-support executive assisting a customer whose UPI payment failed due to insufficient account balance.\n"
+                    "You are a warm, courteous Indian customer-support executive representing the merchant's AI Teammate (Digital Employee #AI-001) assisting a customer whose Kirana store QR payment failed due to insufficient account balance.\n"
                     "Generate a concise, natural Hinglish voice message (max 30 words).\n"
                     "Reassure them it is not a problem: their balance can be topped up (e.g., via a friend/family UPI transfer) and they can pay RIGHT NOW via the 1-click UPI link; Card and EMI are also available as backup.\n"
                     "Do NOT mention any discounts or price reductions.\n"
@@ -549,21 +549,24 @@ def classify_and_decide(
     correlation_id: Optional[str] = None,
     payment_id: Optional[str] = None,
     amount_paise: int = 0,
+    customer_ref: Optional[str] = None,
 ) -> AIDiagnosis:
     """
     Classifies a payment failure and prescribes a bounded recovery action.
 
-    COMPLIANCE PURPOSE:
-    Enforces the Critical Hard-Coded Stopping Rule (retry_count >= 2) before any AI call,
-    ensuring compliance with RBI anti-spam and customer protection guidelines.
-    Extracts comprehensive fallback telemetry on any LLM outage.
+    COMPLIANCE & RESILIENCE PURPOSE:
+    1. Enforces the Critical Hard-Coded Stopping Rule (retry_count >= 2).
+    2. Recalls Cognee Long-Term Memory (with SQLite fallback): if broken_promises >= 2,
+       automatically escalates to human compliance manager (Teammate loses patience).
+    3. Injects customer memory into LLM System Prompt for personalized recovery.
     """
+    import memory
     cid = correlation_id or str(uuid.uuid4())
     pid = payment_id or "SYSTEM"
     current_model = os.getenv("LLM_MODEL", MODEL_NAME)
 
     # =========================================================================
-    # CRITICAL STOPPING RULE: Execute BEFORE any LLM API call
+    # CRITICAL STOPPING RULE 1: Execute BEFORE any LLM API call
     # =========================================================================
     if retry_count >= 2:
         stopping_reason = (
@@ -591,9 +594,51 @@ def classify_and_decide(
         )
 
     # =========================================================================
+    # CRITICAL STOPPING RULE 2: Cognee Long-Term Memory Check
+    # If broken_promises >= 2 -> Teammate loses patience and escalates early
+    # =========================================================================
+    effective_ref = customer_ref or pid
+    memory_context = memory.recall_customer_context(effective_ref, correlation_id=cid)
+    broken_count = memory_context.get("broken_promises", 0)
+
+    if broken_count >= 2:
+        memory_stopping_reason = (
+            f"Customer Memory Guard: broken_promises={broken_count} >= 2 "
+            "(Teammate loses patience). Escalate to human compliance manager immediately."
+        )
+        logger.warning("[MEMORY_GUARD] Escalating %s: broken_promises=%d", pid, broken_count)
+        db.log_event(
+            correlation_id=cid,
+            payment_id=pid,
+            event_type="STOPPING_RULE_TRIGGERED",
+            payload={
+                "customer_ref": memory_context.get("customer_ref"),
+                "broken_promises": broken_count,
+                "memory_context": memory_context,
+                "action": "ESCALATE_HUMAN",
+            },
+            reasoning=memory_stopping_reason,
+            severity="WARNING",
+        )
+        return AIDiagnosis(
+            diagnosis="UNKNOWN",
+            action="ESCALATE_HUMAN",
+            reasoning=memory_stopping_reason,
+            confidence=1.0,
+            scenario="UNKNOWN",
+            blocked_methods=[],
+            enabled_methods=[],
+            upi_intent_uri=None,
+        )
+
+    # =========================================================================
     # LLM Invocation with Model Fallback Chain & Strict JSON Output
     # =========================================================================
     user_prompt = f"Error Code: {error_code}\nError Description: {error_description}"
+    dynamic_system_prompt = (
+        f"{SYSTEM_PROMPT.strip()}\n\n"
+        f"Customer Context: {json.dumps(memory_context)}. Use this historical context to decide the best action, tone, and pacing."
+    )
     
     client = get_llm_client()
     if client:
@@ -613,7 +658,7 @@ def classify_and_decide(
                         max_tokens=400,
                         timeout=8.0,
                         messages=[
-                            {"role": "system", "content": SYSTEM_PROMPT.strip()},
+                            {"role": "system", "content": dynamic_system_prompt},
                             {"role": "user", "content": user_prompt},
                         ],
                     )
@@ -626,10 +671,11 @@ def classify_and_decide(
                         max_tokens=400,
                         timeout=8.0,
                         messages=[
-                            {"role": "system", "content": SYSTEM_PROMPT.strip()},
+                            {"role": "system", "content": dynamic_system_prompt},
                             {"role": "user", "content": user_prompt},
                         ],
                     )
+
                 if not response.choices or not response.choices[0].message:
                     raise ValueError(f"Model {model_name} returned empty choices")
                 raw_content = response.choices[0].message.content or ""
@@ -762,7 +808,9 @@ def process_failed_payment(
         correlation_id=cid,
         payment_id=payment_id,
         amount_paise=amount_paise,
+        customer_ref=payment.get("user_contact"),
     )
+
 
     # Log AI Diagnosis Event to Immutable Audit Log with enriched structured metadata
     diag_payload: Dict[str, Any] = {

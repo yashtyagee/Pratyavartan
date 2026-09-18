@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0a0e1a">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
-  <title>🛡 RECOVERY WAR ROOM | Pratyavartan Command Center</title>
+  <title>🛡️ Pratyavartan: Your Paytm Merchant's AI Teammate | Digital Employee #AI-001</title>
   
   <!-- Bootstrap 5.3 CSS CDN -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
@@ -769,7 +769,7 @@
         type="text" 
         id="voiceCommandInput" 
         class="dock-input" 
-        placeholder="Type command & hit Enter (e.g. 'webhook', 'cart drop', 'bank down', 'agent sweep')..." 
+        placeholder="Type command & hit Enter (e.g. 'webhook', 'qr scan', 'insufficient balance', 'ai sweep')..." 
         onkeydown="handleCommandInputKeyDown(event)"
       />
       <span class="dock-kbd d-none d-md-inline" title="Press / to focus command bar">/</span>
@@ -791,11 +791,11 @@
           </div>
           <div>
             <div class="d-flex align-items-center gap-2">
-              <h1 class="h5 mb-0 brand-gradient">AI Revenue Command Center</h1>
-              <span class="badge bg-dark-subtle text-info border border-info-subtle px-2 py-0 small code-font" style="font-size: 0.7rem;">v1.2 PRO</span>
+              <h1 class="h5 mb-0 brand-gradient">Pratyavartan: Your Paytm Merchant's AI Teammate</h1>
+              <span class="badge bg-dark-subtle text-info border border-info-subtle px-2 py-0 small code-font" style="font-size: 0.7rem;">#AI-001 PRO</span>
             </div>
             <p class="text-secondary small mb-0 code-font" style="font-size: 0.75rem;">
-              Razorpay AI Buildathon 2026 • Autonomous Recovery & Bounded Compliance Engine
+              Digital Employee #AI-001 • Autonomous Kirana Payment Recovery & Bounded Compliance
             </p>
           </div>
         </div>
@@ -831,6 +831,13 @@
             <i class="bi bi-cpu-fill me-1"></i>
             <span>Groq LLaMA 3.3 70B</span>
           </div>
+
+          <!-- Voice Engine Status Badge (Sarvam / gTTS Fallback) -->
+          <div id="voiceEngineBadge" class="badge-status bg-dark border border-success-subtle text-success px-3 py-2 code-font" style="box-shadow: 0 0 10px rgba(34, 197, 94, 0.2);">
+            <i class="bi bi-soundwave me-1"></i>
+            <span id="voiceEngineText">🗣️ Sarvam Active</span>
+          </div>
+
 
           <!-- RBI 9 AM - 9 PM Outreach Window Badge -->
           <div class="badge-status badge-rbi-pill px-3 py-2">
@@ -1142,15 +1149,15 @@
         <!-- Button 1: Trigger Recovery Agent -->
         <div class="col-12 col-sm-6 col-lg-2">
           <button id="btnTriggerAgent" class="btn btn-mission btn-mission-primary w-100" onclick="triggerRecoveryAgent()">
-            <span class="btn-text">▶️ Agent Sweep</span>
+            <span class="btn-text">▶️ AI Teammate Sweep</span>
             <span class="spinner-border spinner-border-sm d-none" role="status"></span>
           </button>
         </div>
 
-        <!-- Button 2: Simulate UPI Limit Failure -->
+        <!-- Button 2: Simulate Insufficient Balance (Kirana) -->
         <div class="col-12 col-sm-6 col-lg-2">
           <button id="btnSimUpi" class="btn btn-mission btn-mission-amber w-100" onclick="simulateUpiLimit()">
-            <span class="btn-text">🧪 UPI Limit</span>
+            <span class="btn-text">🧪 Test Insufficient Balance (Kirana)</span>
             <span class="spinner-border spinner-border-sm d-none" role="status"></span>
           </button>
         </div>
@@ -1163,10 +1170,10 @@
           </button>
         </div>
 
-        <!-- Button 3: Simulate Cart Abandonment -->
+        <!-- Button 3: Simulate QR Scan Failed (Kirana) -->
         <div class="col-12 col-sm-6 col-lg-2">
           <button id="btnSimCart" class="btn btn-mission btn-mission-cyan w-100" onclick="simulateCartAbandonment()">
-            <span class="btn-text">🧪 Cart Drop</span>
+            <span class="btn-text">⚡ Test QR Scan Failed</span>
             <span class="spinner-border spinner-border-sm d-none" role="status"></span>
           </button>
         </div>
@@ -1436,10 +1443,26 @@
             <span>Correlation ID: <strong class="text-info" id="traceCorrelationId">--</strong></span>
             <span class="badge bg-secondary-subtle text-light" id="traceNodeCount">0 Steps</span>
           </div>
+
+          <!-- Teammate Memory Context Widget -->
+          <div id="traceMemoryWidget" class="p-3 mb-3 rounded border border-info-subtle" style="background: rgba(56, 189, 248, 0.05); display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span class="text-info fw-semibold small d-flex align-items-center gap-1.5">
+                <i class="bi bi-cpu text-info"></i>
+                <span>🧠 Teammate Memory (Cognee Knowledge Graph & SQLite)</span>
+              </span>
+              <span id="traceMemorySourceBadge" class="badge bg-dark border border-secondary text-secondary small code-font">SQLite Fallback</span>
+            </div>
+            <div id="traceMemoryContent" class="text-light small code-font">
+              <!-- Memory context injected dynamically -->
+            </div>
+          </div>
+
           <div id="traceTimelineContainer" class="d-flex flex-column gap-3">
             <!-- Trace steps injected here -->
           </div>
         </div>
+
         <div class="modal-footer border-secondary-subtle">
           <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
         </div>
@@ -1739,6 +1762,20 @@
           return '<span class="badge bg-warning text-dark px-2 py-1" style="background-color: #d97706 !important;"><i class="bi bi-shield-lock-fill me-1"></i>QUOTA_PRESERVED</span>';
         case 'ESCALATE_HUMAN':
           return '<span class="badge bg-danger px-2 py-1" style="background-color: #b91c1c !important;"><i class="bi bi-person-fill-exclamation me-1"></i>ESCALATE_HUMAN</span>';
+        case 'N8N_WORKFLOW_DISPATCHED':
+          return '<span class="badge bg-success text-white px-2 py-1" style="background-color: #059669 !important;"><i class="bi bi-diagram-2-fill me-1"></i>Dispatched to n8n ✅</span>';
+        case 'N8N_FALLBACK_INTERNAL':
+          return '<span class="badge bg-warning text-dark px-2 py-1" style="background-color: #f59e0b !important;"><i class="bi bi-gear-wide-connected me-1"></i>Internal Fallback Active ⚙️</span>';
+        case 'SARVAM_FALLBACK_TO_GTTS':
+          return '<span class="badge bg-info text-dark px-2 py-1"><i class="bi bi-arrow-repeat me-1"></i>SARVAM→GTTS</span>';
+        case 'COGNEE_FALLBACK_TO_SQLITE':
+          return '<span class="badge bg-secondary text-light px-2 py-1"><i class="bi bi-database me-1"></i>COGNEE→SQLITE</span>';
+        case 'COGNEE_SYNC':
+          return '<span class="badge bg-secondary text-light px-2 py-1"><i class="bi bi-hdd-network me-1"></i>COGNEE_SYNC</span>';
+        case 'LLM_MODEL_SWITCH':
+          return '<span class="badge bg-warning text-dark px-2 py-1"><i class="bi bi-shuffle me-1"></i>LLM_SWITCH</span>';
+        case 'LLM_ALL_FAILED':
+          return '<span class="badge bg-danger px-2 py-1"><i class="bi bi-exclamation-octagon me-1"></i>LLM_ALL_FAILED</span>';
         case 'DEBUG_QR':
           return '<span class="badge bg-secondary px-2 py-1"><i class="bi bi-qr-code me-1"></i>DEBUG_QR</span>';
         case 'ERROR':
@@ -1747,6 +1784,7 @@
           return `<span class="badge bg-secondary px-2 py-1">${eventType}</span>`;
       }
     }
+
 
     // Render enriched payload with Audio Player, Discount Chips & Raw View
     function renderPayloadContent(payloadRaw) {
@@ -2193,12 +2231,69 @@
         if (!res.ok) throw new Error("Failed to load trace");
         const data = await res.json();
         const nodes = data.nodes || [];
-        document.getElementById('traceNodeCount').innerText = `${nodes.length} Steps`;
+        const hasN8nDispatched = nodes.some(n => n.event_type === 'N8N_WORKFLOW_DISPATCHED');
+        const hasN8nFallback = nodes.some(n => n.event_type === 'N8N_FALLBACK_INTERNAL');
+        let n8nBadgeHtml = '';
+        if (hasN8nDispatched) {
+          n8nBadgeHtml = '<span class="badge bg-success text-white border border-success px-2 py-1 ms-2"><i class="bi bi-diagram-2-fill me-1"></i>Dispatched to n8n ✅</span>';
+        } else if (hasN8nFallback) {
+          n8nBadgeHtml = '<span class="badge bg-warning text-dark border border-warning px-2 py-1 ms-2"><i class="bi bi-gear-wide-connected me-1"></i>Internal Fallback Active ⚙️</span>';
+        }
+        document.getElementById('traceNodeCount').innerHTML = `${nodes.length} Steps ${n8nBadgeHtml}`;
+
+        // Fetch & Render Teammate Memory Context (Cognee / SQLite)
+        const memWidget = document.getElementById('traceMemoryWidget');
+        const memContent = document.getElementById('traceMemoryContent');
+        const memBadge = document.getElementById('traceMemorySourceBadge');
+
+        if (paymentId && paymentId !== 'SYSTEM' && paymentId !== 'SYSTEM_WEBHOOK') {
+          try {
+            const memRes = await fetch(`/api/customer-memory/${encodeURIComponent(paymentId)}`);
+            if (memRes.ok) {
+              const mem = await memRes.json();
+              memBadge.innerText = mem.source === 'cognee' ? 'Cognee Knowledge Graph 🧠' : 'SQLite WAL Fallback 🗄️';
+              memBadge.className = mem.source === 'cognee' ? 'badge bg-purple text-white small code-font' : 'badge bg-dark border border-secondary text-info small code-font';
+
+              const brokenBadgeClass = mem.broken_promises >= 2 ? 'badge bg-danger text-white' : (mem.broken_promises === 1 ? 'badge bg-warning text-dark' : 'badge bg-success text-white');
+              memContent.innerHTML = `
+                <div class="row g-2 pt-1">
+                  <div class="col-sm-3">
+                    <div class="text-secondary small">Customer Ref:</div>
+                    <div class="text-info fw-semibold">${esc(mem.customer_ref || 'Unknown')}</div>
+                  </div>
+                  <div class="col-sm-3">
+                    <div class="text-secondary small">Broken Promises:</div>
+                    <div><span class="${brokenBadgeClass}">${mem.broken_promises || 0}</span> (${mem.kept_promises || 0} kept)</div>
+                  </div>
+                  <div class="col-sm-3">
+                    <div class="text-secondary small">Best Time (IST):</div>
+                    <div class="text-light fw-semibold">${esc(mem.best_time || '20:00')}</div>
+                  </div>
+                  <div class="col-sm-3">
+                    <div class="text-secondary small">Risk Policy:</div>
+                    <div class="${mem.risk_tier === 'HIGH_RISK' ? 'text-danger fw-bold' : 'text-success'}">${esc(mem.risk_tier || 'STANDARD')}</div>
+                  </div>
+                </div>
+                <div class="mt-2 text-secondary small fst-italic border-top border-secondary-subtle pt-1">
+                  <i class="bi bi-info-circle me-1"></i>${esc(mem.summary || 'Context active for bounded AI recovery.')}
+                </div>
+              `;
+              memWidget.style.display = 'block';
+            } else {
+              memWidget.style.display = 'none';
+            }
+          } catch (me) {
+            memWidget.style.display = 'none';
+          }
+        } else {
+          memWidget.style.display = 'none';
+        }
 
         if (nodes.length === 0) {
           container.innerHTML = '<div class="text-secondary text-center py-3">No trace nodes found for this correlation ID.</div>';
           return;
         }
+
 
         container.innerHTML = nodes.map((node, index) => {
           const badge = getBadgeHtml(node.event_type);
@@ -2364,8 +2459,30 @@
             updateLastSweepTicker();
           }
 
+          // Update Voice Engine Status Badge
+          try {
+
+            const vRes = await fetch('/api/voice-status');
+            if (vRes.ok) {
+              const vData = await vRes.json();
+              const vEl = document.getElementById('voiceEngineText');
+              const vBadge = document.getElementById('voiceEngineBadge');
+              if (vEl && vBadge) {
+                vEl.innerText = vData.status_badge || (vData.sarvam_configured ? '🗣️ Sarvam Active' : '🎙️ gTTS Fallback');
+                if (vData.sarvam_configured) {
+                  vBadge.className = 'badge-status bg-dark border border-success-subtle text-success px-3 py-2 code-font';
+                  vBadge.style.boxShadow = '0 0 10px rgba(34, 197, 94, 0.2)';
+                } else {
+                  vBadge.className = 'badge-status bg-dark border border-warning-subtle text-warning px-3 py-2 code-font';
+                  vBadge.style.boxShadow = '0 0 10px rgba(245, 158, 11, 0.2)';
+                }
+              }
+            }
+          } catch (ve) {}
+
           // Update Charts
           updateCharts(m);
+
 
           // Update Promise KPI Card
           const pKept = m.promises_kept || 0;
@@ -2541,14 +2658,14 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             error_code: 'upi_limit_exceeded',
-            error_description: 'Daily UPI limit of ₹1,00,000 exceeded',
-            amount: 75000,
+            error_description: 'Daily UPI limit exceeded at Kirana QR payment counter',
+            amount: 50000,
             user_contact: '9876543210'
           })
         });
         const data = await res.json();
         const action = data.workflow_result?.diagnosis?.action || 'SWITCH_INSTRUMENT';
-        showToast(`⚡ Simulated UPI Limit Failure → Action: ${action} (UPI blocked — 1-Click Card/EMI Link Dispatched, Zero Discount)`);
+        showToast(`⚡ Simulated Insufficient Balance / UPI Limit (Kirana ₹500) → Action: ${action} (UPI blocked — 1-Click Card/EMI Link Dispatched)`);
         await refreshAuditLogsAndMetrics();
       } catch (err) {
         showToast('Error simulating UPI failure', true);
@@ -2565,14 +2682,14 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             error_code: 'insufficient_balance',
-            error_description: 'Account balance insufficient for this transaction',
-            amount: 500000,
+            error_description: 'Customer account balance insufficient for Kirana QR purchase',
+            amount: 50000,
             user_contact: '9876543210'
           })
         });
         const data = await res.json();
         const action = data.workflow_result?.diagnosis?.action || 'SWITCH_INSTRUMENT';
-        showToast(`💸 Simulated Insufficient Balance → Action: ${action} (🔓 UPI re-enabled — 1-Click UPI Intent + Card/EMI backup)`);
+        showToast(`💸 Simulated Insufficient Balance (Kirana ₹500) → Action: ${action} (🔓 UPI re-enabled — 1-Click UPI Intent + Card/EMI backup)`);
         await refreshAuditLogsAndMetrics();
       } catch (err) {
         showToast('Error simulating insufficient balance', true);
@@ -2588,17 +2705,17 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            error_code: 'checkout_incomplete',
-            error_description: 'User closed browser at payment step',
-            amount: 550000,
+            error_code: 'qr_scan_failed',
+            error_description: 'Kirana Store dynamic QR scan payment failed / timed out at checkout',
+            amount: 50000,
             user_contact: '9876543210'
           })
         });
         const data = await res.json();
-        showToast(`Simulated Cart Abandonment (₹5,500) → AI Discount & Hinglish Voice Negotiation Dispatched!`);
+        showToast(`⚡ Simulated Kirana QR Scan Fail (₹500) → AI Teammate Auto-Recovery & Hinglish Voice Dispatched!`);
         await refreshAuditLogsAndMetrics();
       } catch (err) {
-        showToast('Error simulating Cart Drop', true);
+        showToast('Error simulating QR Scan Failed', true);
       } finally {
         setBtnLoading('btnSimCart', false);
       }
@@ -2827,8 +2944,8 @@
       if (transcript.includes('paid') || transcript.includes('success') || transcript.includes('complete payment')) {
         actionTaken = 'Simulating Customer Payment via Recovery Link';
         customerPaid();
-      } else if (transcript.includes('trigger') || transcript.includes('recovery') || transcript.includes('agent')) {
-        actionTaken = 'Triggering Recovery Agent Sweep';
+      } else if (transcript.includes('trigger') || transcript.includes('recovery') || transcript.includes('agent') || transcript.includes('sweep') || transcript.includes('teammate')) {
+        actionTaken = 'Triggering AI Teammate Sweep';
         triggerRecoveryAgent();
       } else if (transcript.includes('retry') || transcript.includes('cap') || transcript.includes('stopping')) {
         actionTaken = 'Simulating Retry Cap Stopping Rule';
@@ -2837,13 +2954,13 @@
         actionTaken = 'Simulating Razorpay Webhook Ingestion';
         simulateRazorpayWebhook();
       } else if (transcript.includes('balance') || transcript.includes('insufficient')) {
-        actionTaken = 'Simulating Insufficient Balance Failure';
+        actionTaken = 'Simulating Insufficient Balance Failure (Kirana)';
         simulateInsufficientBalance();
       } else if (transcript.includes('upi') || transcript.includes('limit')) {
-        actionTaken = 'Simulating UPI Limit Failure';
+        actionTaken = 'Simulating Insufficient Balance / UPI Limit Failure';
         simulateUpiLimit();
-      } else if (transcript.includes('cart') || transcript.includes('drop') || transcript.includes('abandon')) {
-        actionTaken = 'Simulating Cart Drop Recovery';
+      } else if (transcript.includes('qr') || transcript.includes('scan') || transcript.includes('cart') || transcript.includes('drop') || transcript.includes('abandon')) {
+        actionTaken = 'Simulating Kirana QR Scan Failed Recovery';
         simulateCartAbandonment();
       } else if (transcript.includes('bank') || transcript.includes('down')) {
         actionTaken = 'Simulating Bank Downtime';
@@ -2902,7 +3019,7 @@
       recognition.onstart = function() {
         isListening = true;
         micBtn.classList.add('listening');
-        showToast('🎤 Listening for voice commands... (e.g. "Webhook", "Retry Cap", "Cart Drop", "Agent Sweep")');
+        showToast('🎤 Listening for voice commands... (e.g. "Webhook", "Retry Cap", "QR Scan Failed", "AI Sweep")');
       };
 
       recognition.onresult = function(event) {
@@ -3268,10 +3385,11 @@
 
       /* ---------- 8. COMMAND PALETTE (Ctrl/Cmd+K) ---------- */
       const COMMANDS = [
-        { k: 'sweep', label: 'Trigger recovery sweep', run: () => window.triggerRecoveryAgent && triggerRecoveryAgent() },
-        { k: 'upi', label: 'Simulate UPI limit failure', run: () => simulateUpiLimit() },
+        { k: 'sweep', label: 'Trigger AI Teammate recovery sweep', run: () => window.triggerRecoveryAgent && triggerRecoveryAgent() },
+        { k: 'upi', label: 'Simulate Insufficient Balance / UPI limit (Kirana)', run: () => simulateUpiLimit() },
         { k: 'insufficient', label: 'Simulate insufficient balance', run: () => simulateInsufficientBalance() },
-        { k: 'cart', label: 'Simulate cart abandonment', run: () => simulateCartAbandonment() },
+        { k: 'qr', label: 'Simulate Kirana QR scan failed (₹500)', run: () => simulateCartAbandonment() },
+        { k: 'cart', label: 'Simulate Kirana QR scan failed', run: () => simulateCartAbandonment() },
         { k: 'bank', label: 'Simulate bank downtime', run: () => simulateBankDown() },
         { k: 'retry', label: 'Simulate retry cap (stopping rule)', run: () => simulateRetryCap() },
         { k: 'webhook', label: 'Simulate signed webhook', run: () => simulateRazorpayWebhook() },

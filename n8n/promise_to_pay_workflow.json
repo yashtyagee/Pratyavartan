@@ -1,0 +1,287 @@
+{
+  "name": "Pratyavartan - Promise-to-Pay Orchestrator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "promise-to-pay-trigger",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-trigger",
+      "name": "Webhook Trigger (from FastAPI)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 300],
+      "webhookId": "promise-to-pay-trigger"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"status\": \"accepted\",\n  \"dispatched\": true,\n  \"workflow\": \"promise_to_pay_orchestrator\"\n}",
+        "options": {}
+      },
+      "id": "node-respond-webhook",
+      "name": "Acknowledge FastAPI",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [400, 180]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $json.body.remind_at }}",
+        "unit": "seconds"
+      },
+      "id": "node-wait-remind-at",
+      "name": "Wait until remind_at",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [400, 380]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/payment/{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}/status",
+        "options": {}
+      },
+      "id": "node-check-status-1",
+      "name": "Check Payment Status (1st)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [620, 380]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "RECOVERED"
+            }
+          ]
+        }
+      },
+      "id": "node-if-recovered-1",
+      "name": "Is Recovered? (1st Check)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [840, 380]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/log-promise-kept",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"promise_id\": {{ $('Webhook Trigger (from FastAPI)').item.json.body.promise_id || 'null' }},\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
+        "options": {}
+      },
+      "id": "node-log-kept-1",
+      "name": "Log Promise Kept (1st)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/trigger-voice-reminder",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"promise_id\": {{ $('Webhook Trigger (from FastAPI)').item.json.body.promise_id || 'null' }},\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
+        "options": {}
+      },
+      "id": "node-trigger-voice-reminder",
+      "name": "Trigger Voice Reminder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 480]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "minutes"
+      },
+      "id": "node-wait-grace-30m",
+      "name": "Wait Grace Period (30 min)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1300, 480]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/payment/{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}/status",
+        "options": {}
+      },
+      "id": "node-check-status-2",
+      "name": "Check Payment Status (2nd)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 480]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "RECOVERED"
+            }
+          ]
+        }
+      },
+      "id": "node-if-recovered-2",
+      "name": "Is Recovered? (2nd Check)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1740, 480]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/log-promise-kept",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"promise_id\": {{ $('Webhook Trigger (from FastAPI)').item.json.body.promise_id || 'null' }},\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
+        "options": {}
+      },
+      "id": "node-log-kept-2",
+      "name": "Log Promise Kept (2nd)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, 380]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/escalate-human",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"reason\": \"Promise broken: Customer did not complete payment within 30 min grace period after voice reminder.\",\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
+        "options": {}
+      },
+      "id": "node-escalate-human",
+      "name": "Escalate to Human",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, 580]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger (from FastAPI)": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge FastAPI",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait until remind_at",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait until remind_at": {
+      "main": [
+        [
+          {
+            "node": "Check Payment Status (1st)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Payment Status (1st)": {
+      "main": [
+        [
+          {
+            "node": "Is Recovered? (1st Check)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Recovered? (1st Check)": {
+      "main": [
+        [
+          {
+            "node": "Log Promise Kept (1st)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Trigger Voice Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Voice Reminder": {
+      "main": [
+        [
+          {
+            "node": "Wait Grace Period (30 min)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Grace Period (30 min)": {
+      "main": [
+        [
+          {
+            "node": "Check Payment Status (2nd)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Payment Status (2nd)": {
+      "main": [
+        [
+          {
+            "node": "Is Recovered? (2nd Check)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Recovered? (2nd Check)": {
+      "main": [
+        [
+          {
+            "node": "Log Promise Kept (2nd)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate to Human",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "pratyavartan-n8n-instance-01"
+  }
+}

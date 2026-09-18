@@ -13,6 +13,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+import httpx
 import ai_agent
 import db
 import razorpay_service
@@ -20,6 +21,170 @@ import razorpay_service
 logger = logging.getLogger(__name__)
 
 PROMISE_GRACE_MINUTES = int(os.getenv("PROMISE_GRACE_MINUTES", "30"))
+
+
+def dispatch_to_n8n(
+    payload: Dict[str, Any],
+    correlation_id: Optional[str] = None,
+) -> bool:
+    """
+    PART 1: FastAPI Dispatcher with Fallback for n8n Autonomous Workflows.
+    - Tries to POST to os.getenv("N8N_WEBHOOK_URL") with a 5s timeout.
+    - If successful (status 200..299): logs event_type="N8N_WORKFLOW_DISPATCHED" (severity="INFO") and returns True.
+    - If fails (timeout, connection error, 5xx, or unset URL): logs event_type="N8N_FALLBACK_INTERNAL" (severity="WARNING")
+      and returns False so that the internal Python fallback (existing sweep logic) is immediately engaged.
+    """
+    cid = correlation_id or str(uuid.uuid4())
+    payment_id = str(payload.get("payment_id") or "SYSTEM")
+    n8n_url = os.getenv("N8N_WEBHOOK_URL", "").strip()
+
+    if not n8n_url or n8n_url.lower() in ("dummy", "none", "unset", ""):
+        logger.info("[N8N_DISPATCH] N8N_WEBHOOK_URL unset. Engaging internal Python fallback safety net for %s.", payment_id)
+        db.log_event(
+            correlation_id=cid,
+            payment_id=payment_id,
+            event_type="N8N_FALLBACK_INTERNAL",
+            payload={
+                "payment_id": payment_id,
+                "reason": "N8N_WEBHOOK_URL not configured",
+                "fallback": "internal_python_scheduler",
+                "workflow_type": payload.get("workflow_type", "unknown"),
+            },
+            reasoning="N8N webhook URL not provided — immediately engaging internal Python fallback scheduler.",
+            severity="WARNING",
+        )
+        return False
+
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.post(n8n_url, json=payload)
+            if resp.is_success:
+                logger.info("[N8N_DISPATCH] Successfully dispatched workflow to n8n: %s (status %s)", payment_id, resp.status_code)
+                db.log_event(
+                    correlation_id=cid,
+                    payment_id=payment_id,
+                    event_type="N8N_WORKFLOW_DISPATCHED",
+                    payload={
+                        "payment_id": payment_id,
+                        "n8n_url": n8n_url,
+                        "status_code": resp.status_code,
+                        "workflow_type": payload.get("workflow_type"),
+                    },
+                    reasoning="Autonomous workflow successfully dispatched to n8n execution layer.",
+                    severity="INFO",
+                )
+                return True
+            else:
+                error_msg = f"n8n returned HTTP {resp.status_code}: {resp.text[:100]}"
+                logger.warning("[N8N_DISPATCH] %s. Engaging internal fallback.", error_msg)
+                db.log_event(
+                    correlation_id=cid,
+                    payment_id=payment_id,
+                    event_type="N8N_FALLBACK_INTERNAL",
+                    payload={
+                        "payment_id": payment_id,
+                        "error": error_msg,
+                        "status_code": resp.status_code,
+                        "fallback": "internal_python_scheduler",
+                    },
+                    reasoning="n8n webhook call returned error status — engaging internal Python fallback scheduler.",
+                    severity="WARNING",
+                )
+                return False
+    except Exception as exc:
+        logger.warning("[N8N_DISPATCH] Exception dispatching to n8n (%s). Engaging internal fallback.", exc)
+        db.log_event(
+            correlation_id=cid,
+            payment_id=payment_id,
+            event_type="N8N_FALLBACK_INTERNAL",
+            payload={
+                "payment_id": payment_id,
+                "error": str(exc),
+                "fallback": "internal_python_scheduler",
+            },
+            reasoning=f"n8n dispatch encountered error ({exc}) — immediately engaging internal Python fallback scheduler.",
+            severity="WARNING",
+        )
+        return False
+
+
+async def async_dispatch_to_n8n(
+    payload: Dict[str, Any],
+    correlation_id: Optional[str] = None,
+) -> bool:
+    """Async wrapper for dispatching autonomous workflows to n8n."""
+    cid = correlation_id or str(uuid.uuid4())
+    payment_id = str(payload.get("payment_id") or "SYSTEM")
+    n8n_url = os.getenv("N8N_WEBHOOK_URL", "").strip()
+
+    if not n8n_url or n8n_url.lower() in ("dummy", "none", "unset", ""):
+        logger.info("[N8N_DISPATCH] N8N_WEBHOOK_URL unset. Engaging internal Python fallback safety net.")
+        db.log_event(
+            correlation_id=cid,
+            payment_id=payment_id,
+            event_type="N8N_FALLBACK_INTERNAL",
+            payload={
+                "payment_id": payment_id,
+                "reason": "N8N_WEBHOOK_URL not configured",
+                "fallback": "internal_python_scheduler",
+                "workflow_type": payload.get("workflow_type", "unknown"),
+            },
+            reasoning="N8N webhook URL not provided — immediately engaging internal Python fallback scheduler.",
+            severity="WARNING",
+        )
+        return False
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(n8n_url, json=payload)
+            if resp.is_success:
+                logger.info("[N8N_DISPATCH] Successfully dispatched workflow to n8n: %s (status %s)", payment_id, resp.status_code)
+                db.log_event(
+                    correlation_id=cid,
+                    payment_id=payment_id,
+                    event_type="N8N_WORKFLOW_DISPATCHED",
+                    payload={
+                        "payment_id": payment_id,
+                        "n8n_url": n8n_url,
+                        "status_code": resp.status_code,
+                        "workflow_type": payload.get("workflow_type"),
+                    },
+                    reasoning="Autonomous workflow successfully dispatched to n8n execution layer.",
+                    severity="INFO",
+                )
+                return True
+            else:
+                error_msg = f"n8n returned HTTP {resp.status_code}: {resp.text[:100]}"
+                logger.warning("[N8N_DISPATCH] %s. Engaging internal fallback.", error_msg)
+                db.log_event(
+                    correlation_id=cid,
+                    payment_id=payment_id,
+                    event_type="N8N_FALLBACK_INTERNAL",
+                    payload={
+                        "payment_id": payment_id,
+                        "error": error_msg,
+                        "status_code": resp.status_code,
+                        "fallback": "internal_python_scheduler",
+                    },
+                    reasoning="n8n webhook call returned error status — engaging internal Python fallback scheduler.",
+                    severity="WARNING",
+                )
+                return False
+    except Exception as exc:
+        logger.warning("[N8N_DISPATCH] Exception dispatching to n8n (%s). Engaging internal fallback.", exc)
+        db.log_event(
+            correlation_id=cid,
+            payment_id=payment_id,
+            event_type="N8N_FALLBACK_INTERNAL",
+            payload={
+                "payment_id": payment_id,
+                "error": str(exc),
+                "fallback": "internal_python_scheduler",
+            },
+            reasoning=f"n8n dispatch encountered error ({exc}) — immediately engaging internal Python fallback scheduler.",
+            severity="WARNING",
+        )
+        return False
 
 
 def process_single_payment_workflow(
@@ -293,6 +458,12 @@ def run_promise_sweep() -> Dict[str, Any]:
                     )
                     if cursor.rowcount == 1:
                         conn.commit()
+                        import memory
+                        memory.remember_customer_context(
+                            customer_ref=payment.get("user_contact") if payment else pid,
+                            interaction_data={"event": "PROMISE_KEPT", "payment_id": pid, "promise_id": promise_id},
+                            correlation_id=cid,
+                        )
                         db.log_event(
                             correlation_id=cid,
                             payment_id=pid,
@@ -305,6 +476,7 @@ def run_promise_sweep() -> Dict[str, Any]:
                     else:
                         conn.commit()
                 continue
+
 
             # B) DUE FOLLOW-UP: status=pending AND promised_at <= now
             if p_status == "pending" and promise["promised_at"] <= now_str:
@@ -413,6 +585,13 @@ def run_promise_sweep() -> Dict[str, Any]:
                     "escalating to human (bounded autonomy: no 3rd automated outreach)."
                 )
 
+                import memory
+                memory.remember_customer_context(
+                    customer_ref=payment.get("user_contact") if payment else pid,
+                    interaction_data={"event": "PROMISE_BROKEN", "payment_id": pid, "promise_id": promise_id},
+                    correlation_id=cid,
+                )
+
                 # Log PROMISE_BROKEN
                 db.log_event(
                     correlation_id=cid,
@@ -428,6 +607,7 @@ def run_promise_sweep() -> Dict[str, Any]:
                     reasoning=broken_reasoning,
                     severity="WARNING",
                 )
+
 
                 # ESCALATE_HUMAN via existing escalate path
                 db.update_payment_status(pid, "ESCALATED")
@@ -524,12 +704,27 @@ def schedule_mandate_retry(payment_id: str, correlation_id: str) -> Dict[str, An
 
     db.update_payment_status(payment_id, "MONITORING")
 
+    # Dispatch to n8n autonomous execution layer (with automatic internal fallback)
+    dispatch_to_n8n(
+        payload={
+            "workflow_type": "mandate_retry_sequencer",
+            "payment_id": payment_id,
+            "schedule": schedule_list,
+            "a1_utc": a1_utc,
+            "a2_utc": a2_utc,
+            "a3_utc": a3_utc,
+            "correlation_id": correlation_id,
+        },
+        correlation_id=correlation_id,
+    )
+
     return {
         "success": True,
         "action": "MANDATE_RETRY",
         "payment_id": payment_id,
         "schedule": schedule_list,
     }
+
 
 
 def run_mandate_sweep() -> Dict[str, Any]:

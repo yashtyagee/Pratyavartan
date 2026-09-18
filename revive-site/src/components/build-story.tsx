@@ -1,5 +1,10 @@
 const STORIES = [
   {
+    broke: "Sarvam AI / Cognee API timeout",
+    out: "Reliability Fallback Safety Net engaged — voice instantly failed over to gTTS, and context memory safely committed to local SQLite WAL ledger.",
+    code: "voice = sarvam_tts() or gtts_fallback()\nmem = cognee_sync() or sqlite_wal()",
+  },
+  {
     broke: "LLM provider went 404 mid-demo",
     out: "Deterministic fallback engine took over — the sweep never stopped, diagnosis continued on hard-coded rules.",
     code: "fallback_diag = heuristic_classifier(err)",
@@ -8,11 +13,6 @@ const STORIES = [
     broke: "Gateway test quota exhausted",
     out: "Link caching layer born — recovery links are provisioned once, cached, and reused idempotently.",
     code: "link = link_cache.get_or_create(payment_id)",
-  },
-  {
-    broke: "Port died at 2 AM",
-    out: "Hardened restart pipeline — WAL-mode state survives crashes; the sweep resumes exactly where it stopped.",
-    code: "PRAGMA journal_mode=WAL  -- zero data loss",
   },
 ];
 

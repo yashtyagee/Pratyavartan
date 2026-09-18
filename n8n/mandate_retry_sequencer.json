@@ -1,0 +1,371 @@
+{
+  "name": "Pratyavartan - Mandate Retry Sequencer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mandate-retry-trigger",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-trigger",
+      "name": "Webhook Trigger (from FastAPI)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 300],
+      "webhookId": "mandate-retry-trigger"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"status\": \"accepted\",\n  \"dispatched\": true,\n  \"workflow\": \"mandate_retry_sequencer\"\n}",
+        "options": {}
+      },
+      "id": "node-respond-webhook",
+      "name": "Acknowledge FastAPI",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [400, 180]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $json.body.a1_utc }}",
+        "unit": "seconds"
+      },
+      "id": "node-wait-attempt-1",
+      "name": "Wait for Attempt 1 (Tomorrow 10:30 AM IST)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [400, 380]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/mandates/attempt",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"attempt_no\": 1,\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
+        "options": {}
+      },
+      "id": "node-mandate-attempt-1",
+      "name": "Execute Mandate Attempt 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [620, 380]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/payment/{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}/status",
+        "options": {}
+      },
+      "id": "node-check-status-1",
+      "name": "Check Status (After Attempt 1)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [840, 380]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "RECOVERED"
+            }
+          ]
+        }
+      },
+      "id": "node-if-recovered-1",
+      "name": "Is Recovered? (Attempt 1)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1060, 380]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $('Webhook Trigger (from FastAPI)').item.json.body.a2_utc }}",
+        "unit": "seconds"
+      },
+      "id": "node-wait-attempt-2",
+      "name": "Wait for Attempt 2 (Day-After 10:30 AM IST)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1280, 480]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/mandates/attempt",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"attempt_no\": 2,\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
+        "options": {}
+      },
+      "id": "node-mandate-attempt-2",
+      "name": "Execute Mandate Attempt 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 480]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/payment/{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}/status",
+        "options": {}
+      },
+      "id": "node-check-status-2",
+      "name": "Check Status (After Attempt 2)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1720, 480]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "RECOVERED"
+            }
+          ]
+        }
+      },
+      "id": "node-if-recovered-2",
+      "name": "Is Recovered? (Attempt 2)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1940, 480]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $('Webhook Trigger (from FastAPI)').item.json.body.a3_utc }}",
+        "unit": "seconds"
+      },
+      "id": "node-wait-attempt-3",
+      "name": "Wait for Attempt 3 (1st of Next Month 10:30 AM IST)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2160, 580]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/mandates/attempt",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"attempt_no\": 3,\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
+        "options": {}
+      },
+      "id": "node-mandate-attempt-3",
+      "name": "Execute Mandate Attempt 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2380, 580]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/payment/{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}/status",
+        "options": {}
+      },
+      "id": "node-check-status-3",
+      "name": "Check Status (After Attempt 3)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2600, 580]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "RECOVERED"
+            }
+          ]
+        }
+      },
+      "id": "node-if-recovered-3",
+      "name": "Is Recovered? (Attempt 3)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2820, 580]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/escalate-human",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"reason\": \"Mandate retry sequence exhausted: 3 debit attempts failed across RBI schedule windows.\",\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
+        "options": {}
+      },
+      "id": "node-escalate-human",
+      "name": "Escalate to Human (Exhausted)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3060, 680]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger (from FastAPI)": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge FastAPI",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait for Attempt 1 (Tomorrow 10:30 AM IST)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Attempt 1 (Tomorrow 10:30 AM IST)": {
+      "main": [
+        [
+          {
+            "node": "Execute Mandate Attempt 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Mandate Attempt 1": {
+      "main": [
+        [
+          {
+            "node": "Check Status (After Attempt 1)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status (After Attempt 1)": {
+      "main": [
+        [
+          {
+            "node": "Is Recovered? (Attempt 1)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Recovered? (Attempt 1)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait for Attempt 2 (Day-After 10:30 AM IST)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Attempt 2 (Day-After 10:30 AM IST)": {
+      "main": [
+        [
+          {
+            "node": "Execute Mandate Attempt 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Mandate Attempt 2": {
+      "main": [
+        [
+          {
+            "node": "Check Status (After Attempt 2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status (After Attempt 2)": {
+      "main": [
+        [
+          {
+            "node": "Is Recovered? (Attempt 2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Recovered? (Attempt 2)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait for Attempt 3 (1st of Next Month 10:30 AM IST)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Attempt 3 (1st of Next Month 10:30 AM IST)": {
+      "main": [
+        [
+          {
+            "node": "Execute Mandate Attempt 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Mandate Attempt 3": {
+      "main": [
+        [
+          {
+            "node": "Check Status (After Attempt 3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status (After Attempt 3)": {
+      "main": [
+        [
+          {
+            "node": "Is Recovered? (Attempt 3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Recovered? (Attempt 3)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Escalate to Human (Exhausted)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "pratyavartan-n8n-instance-01"
+  }
+}

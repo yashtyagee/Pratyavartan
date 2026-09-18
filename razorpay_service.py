@@ -47,59 +47,16 @@ def generate_voice_audio(
     correlation_id: Optional[str] = None,
 ) -> str:
     """
-    PART C: Synthesizes spoken Hinglish voice audio negotiation file via gTTS.
-    Saves to ./audio/recovery_voice_{payment_id}.mp3 and returns the web-accessible URL path.
-    Features instant local caching by script hash to eliminate repeat synthesis latency.
+    Synthesizes spoken Hinglish voice audio negotiation file via voice_engine.
+    Delegates to Sarvam AI with automatic gTTS fallback.
     """
-    cid = correlation_id or str(uuid.uuid4())
-    filename = f"recovery_voice_{payment_id}.mp3"
-    filepath = os.path.join("audio", filename)
-    audio_url = f"/audio/{filename}"
+    import voice_engine
+    return voice_engine.generate_hinglish_voice(
+        script=script,
+        payment_id=payment_id,
+        correlation_id=correlation_id,
+    )
 
-    # Fast-path 1: If file already exists and is non-empty, return immediately (0ms)
-    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-        return audio_url
-
-    # Fast-path 2: Check content-hash cache so identical scripts reuse audio instantly
-    import hashlib
-    import shutil
-    script_clean = script.strip()
-    script_hash = hashlib.md5(script_clean.encode("utf-8")).hexdigest()[:12]
-    cached_file = os.path.join("audio", f"cached_{script_hash}.mp3")
-    if os.path.exists(cached_file) and os.path.getsize(cached_file) > 0:
-        try:
-            shutil.copyfile(cached_file, filepath)
-            return audio_url
-        except Exception:
-            pass
-
-    try:
-        # Synthesize via gTTS with co.in TLD for low-latency routing in India
-        tts = gTTS(text=script_clean, lang="hi", slow=False, tld="co.in")
-        tts.save(cached_file)
-        shutil.copyfile(cached_file, filepath)
-
-        db.log_event(
-            correlation_id=cid,
-            payment_id=payment_id,
-            event_type="VOICE_GENERATED",
-            payload={"audio_url": audio_url, "payment_id": payment_id, "script_length": len(script)},
-            reasoning="Synthesized Hinglish voice audio negotiation file via gTTS.",
-            severity="INFO",
-        )
-        return audio_url
-
-    except Exception as err:
-        logger.error("Failed to generate voice audio for %s: %s", payment_id, err)
-        db.log_event(
-            correlation_id=cid,
-            payment_id=payment_id,
-            event_type="ERROR",
-            payload={"error": str(err), "action": "VOICE_GENERATED"},
-            reasoning="Voice audio synthesis encountered an error.",
-            severity="WARNING",
-        )
-        return ""
 
 
 def fetch_failed_payments() -> List[str]:
