@@ -546,20 +546,33 @@ def generate_discount_offer(
     error_type: str,
     correlation_id: Optional[str] = None,
     payment_id: Optional[str] = None,
+    suggested_discount_pct: Optional[int] = None,
+    is_mandate: bool = False,
 ) -> Dict[str, Any]:
     """
-    PART B: AI Dynamic Discount Engine.
+    PART B: AI Dynamic Discount Engine with Hard Margin Protection Guardrails.
 
     Evaluates transaction value and applies tiered dynamic incentives to salvage high-intent carts:
     - >= 25,00,000 paise (>= Rs.25,000) -> 5% discount
     - >= 10,00,000 paise (>= Rs.10,000) -> 3% discount
     - >= 5,00,000 paise (>= Rs.5,000)  -> 2% discount
     - else                            -> 0% discount
+
+    GUARDRAILS:
+    - Mandate/Autopay failures: discount is strictly 0% per RBI e-mandate rules.
+    - Code disposes: maximum discount is clamped to 10% (MAX_DISCOUNT_PCT).
     """
     cid = correlation_id or str(uuid.uuid4())
     pid = payment_id or "SYSTEM"
+    MAX_DISCOUNT_PCT = 10
 
-    if amount_paise >= 2500000:
+    # LLM suggests, code disposes — margin protection
+    if is_mandate or "mandate" in str(error_type).lower():
+        # Mandates cannot have arbitrary discounts under RBI e-mandate rules
+        discount_pct = 0
+    elif suggested_discount_pct is not None:
+        discount_pct = max(0, min(int(suggested_discount_pct), MAX_DISCOUNT_PCT))
+    elif amount_paise >= 2500000:
         discount_pct = 5
     elif amount_paise >= 1000000:
         discount_pct = 3
@@ -567,6 +580,9 @@ def generate_discount_offer(
         discount_pct = 2
     else:
         discount_pct = 0
+
+    # Final hard clamp against margin leaks
+    discount_pct = min(discount_pct, MAX_DISCOUNT_PCT)
 
     discount_amount_paise = int(amount_paise * discount_pct / 100)
     final_amount_paise = amount_paise - discount_amount_paise

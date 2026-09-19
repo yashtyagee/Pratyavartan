@@ -4,14 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ShieldCheck,
-  BrainCircuit,
-  AudioWaveform,
-  Lock,
-  Smartphone,
   RotateCw,
   ArrowLeft,
-  AlertTriangle,
-  Award,
 } from "lucide-react";
 import {
   HealthResponse,
@@ -19,7 +13,6 @@ import {
   LinkQuotaResponse,
   DedupStatsResponse,
 } from "@/lib/console-api";
-import { EmployeeReportCard } from "./employee-report-card";
 
 interface ConsoleHeaderProps {
   health?: HealthResponse;
@@ -32,16 +25,11 @@ interface ConsoleHeaderProps {
 }
 
 export default function ConsoleHeader({
-  health,
-  voiceStatus,
-  linkQuota,
-  dedupStats,
   lastUpdated,
   isOffline,
   onRefresh,
 }: ConsoleHeaderProps) {
   const [secondsAgo, setSecondsAgo] = useState(0);
-  const [showReportCard, setShowReportCard] = useState(false);
 
   useEffect(() => {
     setSecondsAgo(0);
@@ -50,17 +38,6 @@ export default function ConsoleHeader({
     }, 1000);
     return () => clearInterval(interval);
   }, [lastUpdated]);
-
-  const voiceProvider = voiceStatus?.active_provider ?? (voiceStatus?.sarvam_available ? "Sarvam Voice" : "gTTS Fallback");
-  const isSarvam = voiceProvider.toLowerCase().includes("sarvam") || voiceStatus?.sarvam_available === true;
-
-  const quotaLimit = linkQuota?.link_quota_limit ?? 30;
-  const quotaUsed = linkQuota?.links_generated_count ?? 0;
-  const quotaRemaining = linkQuota?.links_remaining ?? quotaLimit - quotaUsed;
-  const quotaProgress = Math.min(100, Math.round((quotaUsed / quotaLimit) * 100));
-  const isLowQuota = quotaRemaining <= 3;
-
-  const blockedDupes = dedupStats?.duplicates_blocked ?? 0;
 
   return (
     <header className="sticky top-0 z-40 border-b border-stroke bg-[rgba(5,7,13,0.85)] px-4 py-3 backdrop-blur-xl sm:px-6">
@@ -95,135 +72,20 @@ export default function ConsoleHeader({
           </div>
         </div>
 
-        {/* Live Status Indicators & Partner Chips */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Live / Offline Pulse */}
-          <div
-            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${
-              isOffline
-                ? "border-critical/40 bg-critical/10 text-critical"
-                : "border-recovered/30 bg-recovered/10 text-recovered"
-            }`}
-          >
-            <span className="relative flex h-2 w-2">
-              {!isOffline && (
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-recovered opacity-75" />
-              )}
-              <span
-                className={`relative inline-flex h-2 w-2 rounded-full ${
-                  isOffline ? "bg-critical" : "bg-recovered"
-                }`}
-              />
-            </span>
-            <span className="mono text-[11px] font-semibold">
-              {isOffline ? "OFFLINE DEMO MODE" : "LIVE"}
-            </span>
-          </div>
-
-          {/* LLM Model Chip */}
-          <div className="glass hidden items-center gap-1.5 rounded-full px-3 py-1 md:flex">
-            <BrainCircuit className="h-3.5 w-3.5 text-ai" />
-            <span className="mono text-[11px] text-text">
-              {health?.service ? "Groq LLaMA 3.3" : "AI Agent v1.2"}
-            </span>
-          </div>
-
-          {/* Voice Engine Chip */}
-          <div className="glass hidden items-center gap-1.5 rounded-full px-3 py-1 sm:flex">
-            <AudioWaveform
-              className={`h-3.5 w-3.5 ${
-                isSarvam ? "text-recovered" : "text-monitor"
-              }`}
-            />
-            <span className="mono text-[11px] text-text">
-              {voiceProvider}
-            </span>
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                isSarvam ? "bg-recovered" : "bg-monitor"
-              }`}
-            />
-          </div>
-
-          {/* Link Quota Mini-Bar */}
-          <div className="glass hidden items-center gap-2 rounded-full px-3 py-1 lg:flex">
-            <span className="mono text-[10px] text-muted">LINK QUOTA</span>
-            <div className="h-1.5 w-14 overflow-hidden rounded-full bg-white/10">
-              <div
-                className={`h-full transition-all duration-500 ${
-                  isLowQuota ? "bg-monitor" : "bg-accent"
-                }`}
-                style={{ width: `${quotaProgress}%` }}
-              />
-            </div>
-            <span
-              className={`mono text-[11px] font-semibold ${
-                isLowQuota ? "text-monitor" : "text-text"
-              }`}
-            >
-              {quotaUsed}/{quotaLimit}
-            </span>
-          </div>
-
-          {/* SHA-256 Chained Badge */}
-          <div className="glass hidden items-center gap-1.5 rounded-full px-2.5 py-1 xl:flex">
-            <Lock className="h-3 w-3 text-recovered" />
-            <span className="mono text-[10px] text-muted">SHA-256 CHAINED</span>
-          </div>
-
-          {/* Paytm Adapter Badge */}
-          <div className="glass hidden items-center gap-1.5 rounded-full border-accent/20 px-2.5 py-1 xl:flex">
-            <Smartphone className="h-3 w-3 text-accent" />
-            <span className="mono text-[10px] text-accent">PAYTM ADAPTER</span>
-          </div>
-
-          {/* Dedup Shield Counter */}
-          <div
-            className={`glass flex items-center gap-1.5 rounded-full px-2.5 py-1 ${
-              blockedDupes > 0 ? "border-monitor/40 text-monitor" : "text-muted"
-            }`}
-            title={`${blockedDupes} duplicate webhooks mathematically blocked`}
-          >
-            <ShieldCheck className="h-3.5 w-3.5 text-accent" />
-            <span className="mono text-[11px] font-semibold text-text">
-              {blockedDupes} DEDUP
-            </span>
-          </div>
-
-          {/* AI Teammate Employee Report Card Button */}
+        {/* Right Controls: Relative Timestamp & Refresh */}
+        <div className="flex items-center gap-3">
+          <span className="mono hidden text-[11px] text-muted sm:inline">
+            updated {secondsAgo}s ago
+          </span>
           <button
-            onClick={() => setShowReportCard(true)}
-            className="flex items-center gap-1.5 rounded-full border border-amber-400/40 bg-gradient-to-r from-amber-500/20 to-amber-600/10 px-3 py-1 font-mono text-[11px] font-bold text-amber-300 transition-all hover:scale-105 hover:border-amber-400 hover:shadow-[0_0_15px_rgba(251,191,36,0.3)] active:scale-95 cursor-pointer"
-            title="Open AI Teammate Official Performance Review & ROI Scorecard"
+            onClick={onRefresh}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-stroke bg-surface text-muted transition-colors hover:border-accent hover:text-text active:scale-95 cursor-pointer"
+            title="Force Refresh Data"
           >
-            <Award className="h-3.5 w-3.5 text-amber-300" />
-            <span>AI REPORT CARD</span>
-            <span className="rounded bg-amber-400/30 px-1 py-0.2 text-[9px] font-extrabold text-white">
-              A+
-            </span>
+            <RotateCw className="h-4 w-4" />
           </button>
-
-          {/* Relative Timestamp & Refresh */}
-          <div className="flex items-center gap-2 pl-1">
-            <span className="mono hidden text-[10px] text-muted sm:inline">
-              updated {secondsAgo}s ago
-            </span>
-            <button
-              onClick={onRefresh}
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-stroke bg-surface text-muted transition-colors hover:border-accent hover:text-text active:scale-95"
-              title="Force Refresh Data"
-            >
-              <RotateCw className="h-3.5 w-3.5" />
-            </button>
-          </div>
         </div>
       </div>
-
-      {/* Employee Report Card Modal */}
-      <EmployeeReportCard
-        isOpen={showReportCard}
-        onClose={() => setShowReportCard(false)}
-      />
     </header>
   );
 }

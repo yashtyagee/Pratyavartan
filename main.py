@@ -19,9 +19,10 @@ import logging
 import os
 import time
 import uuid
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, Response, status
@@ -30,6 +31,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+import config
 import db
 import orchestrator
 import ai_agent
@@ -46,9 +48,26 @@ logger = logging.getLogger("RevenueCommandCenter")
 PROMISE_GRACE_MINUTES = int(os.getenv("PROMISE_GRACE_MINUTES", "30"))
 
 
+def clamp_to_rbi_window(dt_ist: datetime) -> Tuple[datetime, bool]:
+    """
+    Guarantees that a datetime in IST strictly resides inside RBI 09:00-21:00 IST outreach hours.
+    - If hour < 9: clamped to 09:00 IST same day.
+    - If hour >= 21: clamped to 09:00 IST next day.
+    Returns (clamped_datetime, was_adjusted).
+    """
+    adjusted = False
+    if dt_ist.hour < 9:
+        dt_ist = dt_ist.replace(hour=9, minute=0, second=0, microsecond=0)
+        adjusted = True
+    elif dt_ist.hour >= 21:
+        dt_ist = (dt_ist + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+        adjusted = True
+    return dt_ist, adjusted
+
+
 def get_webhook_secret() -> bytes:
     """Returns the Razorpay webhook signing secret as bytes."""
-    return os.getenv("RAZORPAY_WEBHOOK_SECRET", "dummy_webhook_secret_key").encode("utf-8")
+    return os.getenv("RAZORPAY_WEBHOOK_SECRET", config.RAZORPAY_WEBHOOK_SECRET).encode("utf-8")
 
 
 @asynccontextmanager
@@ -60,10 +79,17 @@ async def lifespan(app: FastAPI):
     Ensures database schemas, PRAGMA flags, directories, and audit indexes are verified
     before handling any ingress requests. Also starts background schedulers.
     """
-    logger.info("Initializing AI Revenue Command Center database...")
     db.init_db()
     os.makedirs("audio", exist_ok=True)
     print("[OK] DB initialized with Cryptographic Hash Chaining")
+
+    if os.getenv("AUTO_SEED", "false").lower() == "true":
+        try:
+            from scripts.seed_demo import seed_database
+            seed_database()
+            logger.info("Auto-seeded fresh demo state on startup (AUTO_SEED=true)")
+        except Exception as seed_err:
+            logger.warning("Auto-seed error on startup: %s", seed_err)
 
     # Start background scheduler for promises and mandate retry sweeps
     async def _sweep_loop():
@@ -125,8 +151,15 @@ class SimulateFailureRequest(BaseModel):
     error_description: Optional[str] = Field(default=None, description="Descriptive error detail")
     scenario: Optional[str] = Field(default=None, description="Scenario alias for error_code (e.g. qr_fail, low_balance, bank_down)")
     amount: int = Field(default=50000, description="Amount in paise (e.g., 50000 = Rs.500, 500000 = Rs.5,000)")
+    currency: Optional[str] = Field(default="INR", description="Currency (only INR supported)")
+    payment_id: Optional[str] = Field(default=None, description="Optional custom payment ID")
     user_contact: Optional[str] = Field(default=None, description="Customer phone number (will be pseudonymized)")
     customer_contact: Optional[str] = Field(default=None, description="Customer phone number alias")
+
+
+class OptOutRequest(BaseModel):
+    """Request model for TRAI/DPDP customer communication opt-out."""
+    phone: str = Field(..., description="Customer phone number to opt out from automated outreach")
 
 
 # =========================================================================
@@ -272,12 +305,91 @@ async def handle_razorpay_webhook(
     if event == "payment.failed":
         payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
         payment_id = payment_entity.get("id") or f"pay_wh_{uuid.uuid4().hex[:8]}"
-        amount = payment_entity.get("amount", 250000)
-        currency = payment_entity.get("currency", "INR")
+        amount = int(payment_entity.get("amount", 250000))
+        currency = str(payment_entity.get("currency", "INR")).upper()
         error_code = payment_entity.get("error_code") or payment_entity.get("error_reason") or "payment_failed"
-        error_description = payment_entity.get("error_description") or "Payment failed via Razorpay Gateway"
+        error_description = payment_entity.get("error_description") or "Payment failed via Gateway"
         raw_contact = payment_entity.get("contact", "9876543210")
         masked_contact = db.mask_contact(raw_contact)
+
+        # Ingestion Validation (E-05): reject negative/zero amounts, > 10 crore paise, or non-INR currency
+        if amount <= 0 or amount > 1000000000:
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content={"error": "Invalid amount: must be positive integer up to 10,000,000 INR (paise)"},
+            )
+        if currency != "INR":
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content={"error": "Invalid currency: only INR is supported"},
+            )
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", payment_id) or len(payment_id) > 128:
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content={"error": "Invalid payment_id format"},
+            )
+
+        # Hardened Dedup Barrier (E-03): SHA256(payment_id) prevents double processing
+        dedup_key = hashlib.sha256(payment_id.encode("utf-8")).hexdigest()
+        dedup_res = db.check_or_record_dedup(dedup_key, payment_id, event)
+        if dedup_res["is_duplicate"]:
+            db.log_event(
+                correlation_id=correlation_id,
+                payment_id=payment_id,
+                event_type="SECURITY_ALERT",
+                payload={
+                    "action": "DUPLICATE_BLOCKED",
+                    "dedup_key": dedup_key,
+                    "hit_count": dedup_res["hit_count"],
+                    "payment_id": payment_id,
+                },
+                reasoning=f"Idempotency Barrier: Duplicate webhook for payment {payment_id} intercepted. Zero duplicate execution.",
+                severity="WARNING",
+            )
+            existing = db.get_payment(payment_id)
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "status": "duplicate_blocked",
+                    "shield_active": True,
+                    "payment_id": payment_id,
+                    "dedup_key": dedup_key,
+                    "existing_status": existing.get("status") if existing else "PENDING",
+                    "message": "Duplicate webhook intercepted. Recovery was NOT re-triggered.",
+                },
+            )
+
+        # Out-of-Order Webhooks (E-08): check if payment was already captured before failure arrived
+        pending_capture = db.pop_pending_capture(payment_id)
+        if pending_capture:
+            db.insert_or_ignore_payment(
+                payment_id=payment_id,
+                amount=amount,
+                currency=currency,
+                error_code=error_code,
+                error_description=error_description,
+                user_contact=masked_contact,
+                status="RECOVERED",
+            )
+            db.update_payment_status(payment_id, "RECOVERED")
+            db.log_event(
+                correlation_id=correlation_id,
+                payment_id=payment_id,
+                event_type="RECOVERED",
+                payload={"out_of_order_resolved": True, "payment_id": payment_id, "amount": amount},
+                reasoning="Out-of-order webhook resolved: payment was already captured before failure arrived.",
+                severity="INFO",
+            )
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "status": "ok",
+                    "event": "payment.captured",
+                    "payment_id": payment_id,
+                    "payment_status": "RECOVERED",
+                    "out_of_order_resolved": True,
+                },
+            )
 
         # Ingest failed payment idempotently
         db.insert_or_ignore_payment(
@@ -304,7 +416,7 @@ async def handle_razorpay_webhook(
                 "source": "razorpay_webhook",
                 "event": event,
             },
-            reasoning="Payment failure captured via cryptographically verified Razorpay webhook. Routed through autonomous AI recovery pipeline.",
+            reasoning="Payment failure captured via cryptographically verified webhook. Routed through autonomous AI recovery pipeline.",
             severity="INFO",
         )
 
@@ -334,9 +446,24 @@ async def handle_razorpay_webhook(
             plink_entity = payload.get("payload", {}).get("payment_link", {}).get("entity", {})
             notes = plink_entity.get("notes", {})
             payment_id = notes.get("payment_id") or plink_entity.get("id") or "SYSTEM"
+            amt_val = plink_entity.get("amount", 250000)
         else:
             payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
             payment_id = payment_entity.get("id") or payload.get("payment_id") or "SYSTEM"
+            amt_val = payment_entity.get("amount", 250000)
+
+        # Out-of-Order Check: if payment is not yet ingested, buffer in pending_captures
+        existing_payment = db.get_payment(payment_id)
+        if not existing_payment or existing_payment.get("payment_id") == "SYSTEM":
+            db.store_pending_capture(payment_id=payment_id, amount=amt_val, currency="INR", payload=payload)
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "status": "buffered_pending_capture",
+                    "payment_id": payment_id,
+                    "message": "Payment captured before failure record arrived. Buffered in pending_captures table.",
+                },
+            )
 
         # Update payment status to RECOVERED in database
         db.update_payment_status(payment_id, "RECOVERED")
@@ -479,6 +606,154 @@ async def handle_razorpay_webhook(
 
 
 # =========================================================================
+# Paytm S2S Webhook Adapter
+# =========================================================================
+@app.post("/paytm-webhook")
+@app.post("/api/paytm-webhook")
+async def handle_paytm_webhook(request: Request) -> JSONResponse:
+    """
+    Paytm S2S Webhook Callback Adapter (Track 3 Priority 2).
+    Accepts S2S TXN_FAILURE and TXN_SUCCESS callbacks, normalizes them via Paytm Bridge,
+    and drives the recovery pipeline or resolves pending captures.
+    """
+    correlation_id = str(uuid.uuid4())
+    try:
+        payload = await request.json()
+    except Exception:
+        form = await request.form()
+        payload = dict(form)
+
+    txn_id = str(payload.get("TXNID") or payload.get("ORDERID") or f"pay_paytm_{uuid.uuid4().hex[:8]}")
+    status_str = str(payload.get("STATUS", "")).upper()
+    merchant_name = payload.get("MERCHANT_NAME") or payload.get("merchant_name") or "Sharma General Store"
+    resp_msg = payload.get("RESPMSG") or payload.get("result_msg") or f"Paytm transaction {status_str}"
+    resp_code = payload.get("RESPCODE") or payload.get("result_code") or "TXN_ERROR"
+    contact = payload.get("CUSTOMER_PHONE") or payload.get("user_contact") or "9876543210"
+
+    raw_amt = payload.get("TXNAMOUNT") or payload.get("amount") or 3000
+    try:
+        flt_amt = float(raw_amt)
+        amt_paise = int(flt_amt * 100) if flt_amt < 10000 else int(flt_amt)
+    except (ValueError, TypeError):
+        amt_paise = 300000
+
+    if status_str == "TXN_SUCCESS":
+        existing = db.get_payment(txn_id)
+        if not existing or existing.get("payment_id") == "SYSTEM":
+            db.store_pending_capture(payment_id=txn_id, amount=amt_paise, currency="INR", payload=payload)
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"status": "buffered_pending_capture", "payment_id": txn_id},
+            )
+
+        db.update_payment_status(txn_id, "RECOVERED")
+        db.log_event(
+            correlation_id=correlation_id,
+            payment_id=txn_id,
+            event_type="RECOVERED",
+            payload={"source": "paytm_webhook", "amount_paise": amt_paise, "payment_id": txn_id},
+            reasoning=f"Payment {txn_id} recovered via verified Paytm S2S TXN_SUCCESS callback.",
+            severity="INFO",
+        )
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"status": "recovered", "payment_id": txn_id},
+        )
+
+    # TXN_FAILURE / Error
+    dedup_key = f"sha256:{hashlib.sha256(txn_id.encode('utf-8')).hexdigest()[:24]}"
+    dedup_res = db.check_or_record_dedup(dedup_key, txn_id, "paytm.failed")
+    if dedup_res["is_duplicate"]:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"status": "duplicate_ignored", "payment_id": txn_id},
+        )
+
+    pending_cap = db.pop_pending_capture(txn_id)
+    if pending_cap:
+        db.insert_or_ignore_payment(
+            payment_id=txn_id,
+            amount=amt_paise,
+            currency="INR",
+            error_code="paytm_dynamic_qr_drop",
+            error_description=resp_msg,
+            user_contact=contact,
+            status="RECOVERED",
+        )
+        db.update_payment_status(txn_id, "RECOVERED")
+        db.log_event(
+            correlation_id=correlation_id,
+            payment_id=txn_id,
+            event_type="RECOVERED",
+            payload={"out_of_order_resolved": True, "payment_id": txn_id, "source": "paytm"},
+            reasoning="Out-of-order Paytm webhook resolved: payment was captured before failure arrived.",
+            severity="INFO",
+        )
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"status": "recovered_out_of_order", "payment_id": txn_id},
+        )
+
+    db.insert_or_ignore_payment(
+        payment_id=txn_id,
+        amount=amt_paise,
+        currency="INR",
+        error_code="paytm_dynamic_qr_drop",
+        error_description=resp_msg,
+        user_contact=contact,
+        status="PENDING",
+    )
+
+    db.log_event(
+        correlation_id=correlation_id,
+        payment_id=txn_id,
+        event_type="S2S_CALLBACK",
+        payload={
+            "source": "paytm",
+            "merchant_name": merchant_name,
+            "raw_event": "TXN_FAILURE",
+            "result_code": resp_code,
+            "adapter_status": "NORMALIZED",
+            "amount_paise": amt_paise,
+        },
+        reasoning=f"Paytm S2S TXN_FAILURE callback for {merchant_name} normalized via Paytm Bridge.",
+        severity="INFO",
+    )
+
+    db.log_event(
+        correlation_id=correlation_id,
+        payment_id=txn_id,
+        event_type="DETECTED",
+        payload={
+            "amount_paise": amt_paise,
+            "error_code": "paytm_dynamic_qr_drop",
+            "error_description": resp_msg,
+            "masked_contact": db.mask_contact(contact),
+            "merchant_name": merchant_name,
+            "adapter": "Paytm Bridge v1.2",
+        },
+        reasoning=f"Payment failure at {merchant_name} captured via Paytm QR Bridge.",
+        severity="INFO",
+    )
+
+    # Drive recovery workflow
+    workflow_result = orchestrator.process_single_payment_workflow(
+        payment_id=txn_id,
+        correlation_id=correlation_id,
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "status": "ok",
+            "payment_id": txn_id,
+            "adapter_status": "NORMALIZED",
+            "workflow_result": workflow_result,
+        },
+    )
+
+
+# =========================================================================
 # Webhook Simulation Endpoint (Demo without ngrok)
 # =========================================================================
 @app.post("/simulate-webhook")
@@ -488,6 +763,11 @@ async def simulate_webhook() -> Dict[str, Any]:
     Computes a valid HMAC-SHA256 signature and internally dispatches to /razorpay-webhook,
     proving the exact production signature verification and recovery pipeline live.
     """
+    if not config.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Simulation disabled in production",
+        )
     sim_payment_id = f"pay_wh_sim_{uuid.uuid4().hex[:8]}"
     sim_order_id = f"order_{uuid.uuid4().hex[:10]}"
     current_timestamp = int(time.time())
@@ -577,16 +857,92 @@ def trigger_agent() -> Dict[str, Any]:
 
 
 @app.post("/simulate-failure")
+@app.post("/api/simulate-failure")
 def simulate_failure(req: SimulateFailureRequest) -> Dict[str, Any]:
     """
     Interactive Simulation Endpoint for Live Demonstrations.
+    Protected by DEMO_MODE barrier, amount/currency validation, and dedup shield.
     """
-    sim_payment_id = f"pay_sim_{uuid.uuid4().hex[:8]}"
+    if not config.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Simulation disabled in production",
+        )
+
+    # Ingestion Validation (E-05)
+    if req.amount <= 0 or req.amount > 1000000000:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid amount: must be positive integer up to 10,000,000 INR (paise)",
+        )
+    if req.currency and req.currency.upper() != "INR":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid currency: only INR is supported",
+        )
+
+    sim_payment_id = req.payment_id or f"pay_sim_{uuid.uuid4().hex[:8]}"
     correlation_id = str(uuid.uuid4())
+
+    # Hardened Dedup Barrier (E-03)
+    dedup_key = hashlib.sha256(sim_payment_id.encode("utf-8")).hexdigest()
+    dedup_res = db.check_or_record_dedup(dedup_key, sim_payment_id, "payment.failed")
+    if dedup_res["is_duplicate"]:
+        db.log_event(
+            correlation_id=correlation_id,
+            payment_id=sim_payment_id,
+            event_type="SECURITY_ALERT",
+            payload={
+                "action": "DUPLICATE_BLOCKED",
+                "dedup_key": dedup_key,
+                "hit_count": dedup_res["hit_count"],
+                "payment_id": sim_payment_id,
+            },
+            reasoning=f"Idempotency Barrier: Duplicate simulation for payment {sim_payment_id} intercepted.",
+            severity="WARNING",
+        )
+        existing = db.get_payment(sim_payment_id)
+        return {
+            "status": "duplicate_blocked",
+            "shield_active": True,
+            "payment_id": sim_payment_id,
+            "dedup_key": dedup_key,
+            "existing_status": existing.get("status") if existing else "PENDING",
+            "message": "Duplicate simulation intercepted by idempotency shield.",
+        }
 
     err_code = req.error_code or req.scenario or "qr_fail"
     err_desc = req.error_description or f"Payment failed due to {err_code}"
     contact = req.user_contact or req.customer_contact or "9876543210"
+
+    # Out-of-Order Webhook Check (E-08)
+    pending_capture = db.pop_pending_capture(sim_payment_id)
+    if pending_capture:
+        db.insert_or_ignore_payment(
+            payment_id=sim_payment_id,
+            amount=req.amount,
+            currency="INR",
+            error_code=err_code,
+            error_description=err_desc,
+            user_contact=contact,
+            status="RECOVERED",
+        )
+        db.update_payment_status(sim_payment_id, "RECOVERED")
+        db.log_event(
+            correlation_id=correlation_id,
+            payment_id=sim_payment_id,
+            event_type="RECOVERED",
+            payload={"out_of_order_resolved": True, "payment_id": sim_payment_id, "amount": req.amount},
+            reasoning="Out-of-order webhook resolved: payment was already captured before failure arrived.",
+            severity="INFO",
+        )
+        return {
+            "success": True,
+            "payment_id": sim_payment_id,
+            "correlation_id": correlation_id,
+            "status": "RECOVERED",
+            "out_of_order_resolved": True,
+        }
 
     # Step 1: Ingest payment into database
     db.insert_or_ignore_payment(
@@ -636,6 +992,11 @@ def simulate_retry_cap() -> Dict[str, Any]:
     Simulates Stopping Rule Enforcement by attempting recovery on a payment with retry_count >= 2.
     Guarantees that the LLM is skipped, logging STOPPING_RULE_TRIGGERED and ESCALATED.
     """
+    if not config.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Simulation disabled in production",
+        )
     sim_payment_id = f"pay_sim_retry_{uuid.uuid4().hex[:8]}"
     correlation_id = str(uuid.uuid4())
 
@@ -699,6 +1060,11 @@ async def customer_paid(request: Request) -> JSONResponse:
     Accepts optional JSON body: {"payment_id": "<id>"}; when absent, the most recent
     payment with a DETECTED event and no RECOVERED event is selected automatically.
     """
+    if not config.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Simulation disabled in production",
+        )
     correlation_id = str(uuid.uuid4())
 
     # 1. Resolve target payment (explicit payment_id wins, else latest pending)
@@ -879,6 +1245,11 @@ async def simulate_customer_pays(payment_id: str) -> JSONResponse:
     Dispatches a signed HMAC-SHA256 Razorpay payment_link.paid webhook through the
     production /razorpay-webhook path, exercising full cryptographic verification and recovery cascade.
     """
+    if not config.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Simulation disabled in production",
+        )
     correlation_id = str(uuid.uuid4())
     payment = db.get_payment(payment_id)
     amount_paise = int(payment.get("amount", 300000)) if payment else 300000
@@ -1041,6 +1412,11 @@ def simulate_mandate_failure() -> Dict[str, Any]:
     """
     Simulates a mandate/autopay debit failure for Mandate Retry Sequencer testing.
     """
+    if not config.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Simulation disabled in production",
+        )
     sim_payment_id = f"pay_mnd_{uuid.uuid4().hex[:8]}"
     correlation_id = str(uuid.uuid4())
 
@@ -1139,6 +1515,11 @@ def simulate_paytm_qr_failure(req: Optional[SimulatePaytmQrRequest] = None) -> D
     Simulates Paytm TXN_FAILURE callback, normalizes it via Paytm Adapter,
     and drives the recovery pipeline.
     """
+    if not config.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Simulation disabled in production",
+        )
     if req is None:
         req = SimulatePaytmQrRequest()
     sim_payment_id = f"pay_paytm_{uuid.uuid4().hex[:8]}"
@@ -1214,6 +1595,11 @@ async def simulate_duplicate_webhook() -> Dict[str, Any]:
     Simulates sending the identical signed webhook twice in a row.
     The first event is processed; the second is mathematically intercepted and blocked.
     """
+    if not config.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Simulation disabled in production",
+        )
     sim_payment_id = f"pay_wh_dedup_{uuid.uuid4().hex[:8]}"
     correlation_id = str(uuid.uuid4())
     dedup_key = f"sha256:{hashlib.sha256(sim_payment_id.encode('utf-8')).hexdigest()[:24]}"
@@ -1289,12 +1675,65 @@ def get_metrics() -> JSONResponse:
 def reset_demo() -> JSONResponse:
     """
     DEV Endpoint: Truncates audit_logs, link_cache, and test failed payments for a clean demo state.
+    Guarantees Genesis Block #0 creation and verifies SHA-256 chain integrity.
     """
-    db.reset_demo_data()
+    if not config.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Simulation disabled in production",
+        )
+    res = db.reset_demo_data()
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content={"status": "success", "message": "Demo data reset successfully."},
+        content={
+            "status": "success",
+            "chain_valid": res.get("chain_valid", True),
+            "block_count": res.get("block_count", 1),
+            "message": "Demo data reset successfully and Genesis Block #0 verified.",
+            "report": res.get("report", {}),
+        },
     )
+
+
+@app.post("/api/customer/opt-out")
+async def api_customer_opt_out(req: OptOutRequest) -> JSONResponse:
+    """
+    TRAI/TCCCPR & DPDP Customer Opt-Out Endpoint.
+    Records customer opt-out in customer_consent (opted_in=0) and dnd_registry (is_dnd=1),
+    and appends an immutable CONSENT_REVOKED audit event.
+    """
+    import compliance_gate
+    clean_phone = compliance_gate.normalize_phone(req.phone)
+    db.set_customer_opt_out(clean_phone)
+    cid = str(uuid.uuid4())
+    masked = db.mask_contact(clean_phone)
+    db.log_event(
+        correlation_id=cid,
+        payment_id="SYSTEM",
+        event_type="CONSENT_REVOKED",
+        payload={"phone": masked, "normalized_phone": clean_phone, "opted_out": True},
+        reasoning="Customer opted out of all automated voice and SMS communications under TRAI/TCCCPR and DPDP regulations.",
+        severity="INFO",
+    )
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "status": "opted_out",
+            "phone": clean_phone,
+            "masked_phone": masked,
+            "message": "Successfully opted out from all automated communications.",
+        },
+    )
+
+
+@app.get("/api/employee-report")
+def get_employee_report() -> JSONResponse:
+    """
+    Returns real-time AI Teammate Official Performance Review & ROI Scorecard
+    calculated dynamically from SQLite failed_payments and audit_logs.
+    """
+    stats = db.get_employee_report_stats()
+    return JSONResponse(content=stats)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -1430,35 +1869,31 @@ async def promise_to_pay(request: Request) -> JSONResponse:
         reasoning = "DEMO MODE \u2014 RBI window bypassed for live demonstration"
     else:
         # REAL MODE with RBI 9-21 IST window clamping
-        target_hour = promised_hour
         mode = "REAL"
-
-        # Clamp to 9-21 IST window
-        if target_hour < 9:
-            reasoning = f"Requested {target_hour:02d}:00 \u2192 clamped to 09:00 IST per RBI outreach window"
-            target_hour = 9
-            clamped = True
-        elif target_hour >= 22:
-            reasoning = f"Requested {promised_hour:02d}:00 \u2192 clamped to 21:00 IST per RBI outreach window"
-            target_hour = 21
-            clamped = True
-
-        # Build target IST datetime
-        target_ist = now_ist.replace(hour=target_hour, minute=0, second=0, microsecond=0)
-
-        # If target time already passed today, roll to next day
+        target_ist = now_ist.replace(hour=promised_hour, minute=0, second=0, microsecond=0)
         if target_ist <= now_ist:
             target_ist += timedelta(days=1)
-            if not clamped:
-                reasoning = f"Requested {promised_hour:02d}:00 \u2192 rolled to next day {promised_hour:02d}:00 IST (time already past)"
-            else:
-                reasoning += f" \u2192 rolled to next day (time already past)"
-            clamped = True
 
-        if not reasoning:
-            reasoning = f"Promise scheduled at {target_hour:02d}:00 IST within RBI outreach window"
+        clamped_ist, was_clamped = clamp_to_rbi_window(target_ist)
+        clamped = was_clamped
+        if was_clamped:
+            reasoning = f"Requested {promised_hour:02d}:00 IST -> clamped to {clamped_ist.strftime('%H:%M')} IST ({clamped_ist.strftime('%d-%b')}) per RBI outreach guidelines (09:00-21:00 IST)"
+            db.log_event(
+                correlation_id=correlation_id,
+                payment_id=payment_id,
+                event_type="RBI_WINDOW_ADJUSTED",
+                payload={
+                    "requested_hour": promised_hour,
+                    "clamped_ist": clamped_ist.strftime("%Y-%m-%d %H:%M:%S"),
+                    "reason": "RBI outreach window 09:00-21:00 IST enforcement",
+                },
+                reasoning=reasoning,
+                severity="INFO",
+            )
+        else:
+            reasoning = f"Promise scheduled at {clamped_ist.strftime('%H:%M')} IST within RBI outreach window"
 
-        # Convert IST target to UTC
+        target_ist = clamped_ist
         promised_at_utc = target_ist - ist_offset
 
     promised_at_str = promised_at_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1621,6 +2056,28 @@ async def api_trigger_voice_reminder(req: TriggerVoiceReminderRequest) -> JSONRe
     cid = req.correlation_id or str(uuid.uuid4())
     pid = req.payment_id
 
+    payment = db.get_payment(pid)
+    if payment and payment.get("status") == "RECOVERED":
+        db.log_event(
+            correlation_id=cid,
+            payment_id=pid,
+            event_type="SWEEP_ABORTED_ALREADY_RECOVERED",
+            payload={"payment_id": pid, "action": "voice_reminder_aborted", "status": "RECOVERED"},
+            reasoning="Payment already recovered; voice sweep reminder aborted to protect customer experience.",
+            severity="INFO",
+        )
+        return JSONResponse(
+            content={"status": "aborted", "reason": "already_recovered", "payment_id": pid}
+        )
+
+    import compliance_gate
+    phone = (payment.get("user_contact") if payment else "") or ""
+    gate_res = compliance_gate.check_compliance_gate(phone, pid, cid)
+    if not gate_res["allowed"]:
+        return JSONResponse(
+            content={"status": "blocked_by_compliance", "reason": gate_res["reason"], "payment_id": pid}
+        )
+
     with db.get_connection() as conn:
         cursor = conn.cursor()
         if req.promise_id:
@@ -1763,6 +2220,19 @@ async def api_mandate_attempt(req: MandateAttemptRequest) -> JSONResponse:
     payment = db.get_payment(pid)
     if not payment:
         return JSONResponse(status_code=404, content={"status": "error", "message": f"Payment {pid} not found"})
+
+    if payment.get("status") == "RECOVERED":
+        db.log_event(
+            correlation_id=cid,
+            payment_id=pid,
+            event_type="SWEEP_ABORTED_ALREADY_RECOVERED",
+            payload={"payment_id": pid, "action": "mandate_attempt_aborted", "status": "RECOVERED"},
+            reasoning="Payment already recovered; mandate sweep retry aborted to prevent duplicate debit.",
+            severity="INFO",
+        )
+        return JSONResponse(
+            content={"status": "aborted", "reason": "already_recovered", "payment_id": pid}
+        )
 
     db.log_event(
         correlation_id=cid,

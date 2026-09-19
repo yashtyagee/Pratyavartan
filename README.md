@@ -230,51 +230,60 @@ Visit [http://localhost:3000](http://localhost:3000) for the 3D animated landing
 
 ---
 
-## 🧪 Hackathon Jury: Interactive Evaluation Guide
+## 🧪 Hackathon Jury: Interactive Evaluation & Acceptance Proof Suite
 
-The Merchant Command Center includes a built-in **Live Simulation Engine** for real-time testing:
+Pratyavartan includes a mathematically verified proof suite that exercises all 5 recovery acceptance gates live:
 
-| Scenario | Simulated Failure Code | Expected AI Response |
-|---|---|---|
-| **🔴 Test Insufficient Balance (Kirana)** | `PAYMENT_UPI_LIMIT_EXCEEDED` / `INSUFFICIENT_BALANCE` | `SWITCH_INSTRUMENT` → 1-click Card/EMI recovery link or UPI intent, **zero discount** |
-| **🟡 Test QR Scan Failed** | `QR_SCAN_FAILED` (₹500 Kirana QR) | `SEND_UPI_INTENT` → Zero-UI 1-click recovery deep link with instant closure |
-| **🟠 Test Bank Down** | `GATEWAY_TIMEOUT` | `WAIT_AND_MONITOR` → Silent hold, **no customer outreach** |
-| **🔵 Test Max Retries** | Payment with `retry_count >= 2` | `ESCALATE_HUMAN` → AI aborts, logs `STOPPING_RULE_TRIGGERED` |
+```bash
+# Run full automated proof suite (5/5 acceptance gates)
+node scripts/prove_full_loop.mjs
 
-### How to Test:
-1. Open the **War Room Dashboard** → scroll to **Live Simulation Engine**.
-2. Click any scenario button → watch the audit trail update in real-time.
-3. Click **Trigger Recovery Sweep** → observe autonomous orchestration.
-4. Verify **KPI cards** update: Revenue at Risk, Revenue Recovered, Active Monitoring, Escalated.
+# Seed 10 realistic Kirana transactions with valid SHA-256 hash chains
+python scripts/seed_demo.py
+```
+
+### Acceptance Test Matrix
+
+| Test Gate | Scenario | Expected Behavior | Cryptographic Guarantee |
+|---|---|---|---|
+| **1. Happy Path (Kirana QR)** | QR scan drop (₹3,000) | Instant diagnosis → 2% margin discount → Sarvam Hinglish voice → S2S payment link → Customer paid → `RECOVERED` | 8-stage audit trail verified in SHA-256 chain |
+| **2. Stopping Rule (Retry Cap)** | Payment with `retry_count >= 2` | AI evaluation bypassed → `STOPPING_RULE_TRIGGERED` → `ESCALATE_HUMAN` (0 customer outreach) | Customer harassment mathematically prevented |
+| **3. Bank Outage (Quiet Hold)** | Gateway timeout / NPCI switch failure | `WAIT_AND_MONITOR` → Silent hold (0 voice/SMS spam) | Reputation protection enforced |
+| **4. Cryptographic Hash Chain** | All state changes in SQLite WAL | `hash = SHA256(prev_hash + event_data)` with Genesis Block #0 | Non-repudiation verified via `GET /api/verify-audit-chain` |
+| **5. Regulatory Compliance Gate** | Customer opted out / on DND registry | TRAI / TCCCPR & DPDP check fails → `COMPLIANCE_GATE_CHECKED (false)` → Status `ESCALATED` (0 outreach) | Zero illegal contact under DPDP Act 2023 |
 
 ---
 
-## 🔒 Compliance & Security
+## 🔒 Compliance & Security Architecture
 
-| Guardrail | Implementation |
+| Guardrail | Implementation & Legal Reference |
 |---|---|
-| **PII Data Masking** | Customer phone numbers masked on ingestion (`******1234`) — never stored in plaintext |
-| **Webhook Cryptography** | All Razorpay webhooks verified via `X-Razorpay-Signature` HMAC SHA-256 |
-| **Audit Immutability** | SHA-256 hash-chaining (`hash = SHA256(prev_hash + event)`) prevents log tampering |
-| **Anti-Harassment** | Hard stop at 2 retries per payment — no exceptions |
-| **CORS Protection** | Strict origin allowlisting via `ALLOWED_ORIGINS` environment variable |
+| **TRAI / TCCCPR & DPDP Gate** | 3-point check (`customer_consent` opt-in + `dnd_registry` check + 24-hr max 2 contacts frequency cap). Verified via `POST /api/customer/opt-out`. |
+| **DEMO_MODE Fraud Hole Plug** | All simulation endpoints (`/simulate-*`, `/api/reset-demo`) strictly gated behind `DEMO_MODE=true` (HTTP 403 in production). |
+| **Idempotency Dedup Shield** | Cryptographic SHA-256 deduplication barrier intercepts duplicate webhooks & replayed simulations. |
+| **Out-of-Order Webhook Resolution** | Buffered in `pending_captures` table. If `payment.captured` precedes `payment.failed`, payment is marked `RECOVERED` with 0 unnecessary outreach. |
+| **RBI Double Clamping** | Promise-to-Pay automatically clamped to 09:00–21:00 IST window; late-night promises roll to 09:00 IST next day (`RBI_WINDOW_ADJUSTED`). |
+| **Margin Protection Safeguard** | Hard code-level discount clamping: max 10.0% ceiling, 0% on recurring mandates. LLM cannot exceed limits. |
+| **PII Data Pseudonymization** | Customer phone numbers pseudonymized at ingestion boundary (`******1234`) — never exposed in plaintext logs or UI. |
 
 ---
 
 ## 🚢 Deployment Options
 
-| Platform | Type | Guide |
+| Platform | Type | Command / Guide |
 |---|---|---|
-| **Cloudflare Tunnel** | Backend (primary) | `cloudflared tunnel --url http://localhost:8010` |
-| **Vercel** | Frontend Landing | [DEPLOY_VERCEL.md](DEPLOY_VERCEL.md) |
+| **Cloudflare Tunnel** | Backend (FastAPI :8010) | `cloudflared tunnel --url http://localhost:8010` |
+| **Next.js War Room** | Frontend Console (:8080) | `cd revive-site && npm run dev -p 8080` |
+| **n8n Autonomous Layer** | Workflow Orchestrator (:5678) | `npx n8n start` |
+| **Vercel** | Production Landing | [DEPLOY_VERCEL.md](DEPLOY_VERCEL.md) |
 | **Docker** | Full-stack containerized | `docker-compose up --build` |
-| **Render** | Cloud PaaS | Uses [render.yaml](render.yaml) blueprint |
 
 ---
 
 ## 👥 Team & Acknowledgments
 
-Built with ❤️ for the **Razorpay AI Buildathon 2026**.
+Built with ❤️ for the **Razorpay AI Buildathon 2026** (Track 3: Digital Coworker / AI Teammate).
 
-- **Nilesh** — Architecture, Backend Engine, AI Integration, Deployment
-- **Repository**: [github.com/Nilesh1381/Pratyavartan](https://github.com/Nilesh1381/Pratyavartan)
+- **Repository**: [github.com/yashtyagee/Pratyavartan](https://github.com/yashtyagee/Pratyavartan)
+- **License**: MIT
+

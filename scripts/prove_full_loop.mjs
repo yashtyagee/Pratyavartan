@@ -280,6 +280,77 @@ async function testAuditChainIntegrity() {
   return true;
 }
 
+async function testComplianceGate() {
+  console.log("\n=======================================================");
+  console.log("🛡️ TEST 5: REGULATORY COMPLIANCE GATE (TRAI / TCCCPR + DPDP)");
+  console.log("   Scenario: Opted-Out / DND Subscriber -> Outreach Intercepted -> Status ESCALATED -> 0 Voice / 0 Outreach");
+  console.log("=======================================================");
+
+  // 1. Explicitly opt out customer +919999999999
+  console.log("[1/3] Registering customer opt-out under TRAI/DPDP regulations...");
+  const optRes = await fetch(`${API_BASE}/api/customer/opt-out`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone: "+919999999999" }),
+  });
+
+  if (!optRes.ok) {
+    throw new Error(`api/customer/opt-out failed: HTTP ${optRes.status} ${await optRes.text()}`);
+  }
+  const optData = await optRes.json();
+  console.log(`      Opt-Out Confirmed: ${optData.masked_phone} registered in DND registry.`);
+
+  // 2. Simulate payment failure for opted-out subscriber
+  console.log("[2/3] Simulating QR failure for opted-out subscriber (+919999999999)...");
+  const simRes = await fetch(`${API_BASE}/simulate-failure`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      error_code: "qr_fail",
+      amount: 250000,
+      user_contact: "9999999999",
+    }),
+  });
+
+  if (!simRes.ok) {
+    throw new Error(`simulate-failure failed: HTTP ${simRes.status} ${await simRes.text()}`);
+  }
+
+  const simData = await simRes.json();
+  const paymentId = simData.payment_id;
+  const workflowRes = simData.workflow_result || {};
+  console.log(`      Payment ID: ${paymentId}`);
+  console.log(`      Workflow Status: ${workflowRes.status || "COMPLETED"}`);
+
+  // 3. Verify status ESCALATED and ZERO outreach
+  console.log("[3/3] Verifying payment escalated and 0 outbound voice/messages dispatched...");
+  await sleep(1500);
+
+  const statusRes = await fetch(`${API_BASE}/api/payment/${paymentId}/status`);
+  const statusData = await statusRes.json();
+  console.log(`      Final Payment Status: ${statusData.status}`);
+
+  if (statusData.status !== "ESCALATED") {
+    throw new Error(`Expected ESCALATED due to compliance block, but got ${statusData.status}`);
+  }
+
+  const logRes = await fetch(`${API_BASE}/api/audit-logs?limit=50`);
+  const logs = await logRes.json();
+  const paymentLogs = logs.filter((l) => l.payment_id === paymentId);
+  const eventTypes = paymentLogs.map((l) => l.event_type);
+  console.log(`      Audit Events: ${eventTypes.join(" → ")}`);
+
+  if (!eventTypes.includes("COMPLIANCE_GATE_CHECKED")) {
+    throw new Error("Missing COMPLIANCE_GATE_CHECKED event in audit ledger!");
+  }
+  if (eventTypes.includes("MESSAGE_SENT") || eventTypes.includes("VOICE_GENERATED")) {
+    throw new Error("CRITICAL COMPLIANCE BREACH: Outreach was dispatched to an opted-out/DND customer!");
+  }
+
+  console.log("   ✅ Compliance Gate Verified: Outbound communication blocked, 0 spam, audit logged.");
+  return true;
+}
+
 async function main() {
   console.log("#######################################################");
   console.log("🎖️ PRATYAVARTAN REVENUE RECOVERY ENGINE - PROOF SUITE");
@@ -290,10 +361,11 @@ async function main() {
     await testHappyPath();
     await testNegativePathRetryCap();
     await testNegativePathBankDown();
+    await testComplianceGate();
     await testAuditChainIntegrity();
 
     console.log("\n=======================================================");
-    console.log("🎉 ALL RECOVERY ACCEPTANCE GATES PASSED (100% GREEN)!");
+    console.log("🎉 ALL 5 RECOVERY ACCEPTANCE GATES PASSED (100% GREEN)!");
     console.log("=======================================================\n");
     process.exit(0);
   } catch (err) {

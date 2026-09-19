@@ -15,13 +15,23 @@
 # ═══════════════════════════════════════════════════════════════════
 
 services:
-  # ── Backend: FastAPI + SQLite (Docker) ──────────────────────────
+  # ── Backend: FastAPI + SQLite (Python) ──────────────────────────
   - type: web
-    name: revive-backend
-    runtime: docker
+    name: pratyavartan-backend
+    runtime: python
     plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
+      - key: DEMO_MODE
+        value: "true"
+      - key: AUTO_SEED
+        value: "true"
+      - key: DATABASE_PATH
+        value: revenue_recovery.db
+      - key: ALLOWED_ORIGINS
+        value: "https://pratyavartan.vercel.app,http://localhost:8080,http://localhost:3000"
       # --- Secrets (filled in Render dashboard) ---
       - key: RAZORPAY_KEY_ID
         sync: false
@@ -30,22 +40,6 @@ services:
       - key: LLM_API_KEY
         sync: false
       - key: RAZORPAY_WEBHOOK_SECRET
-        sync: false
-      # --- Non-secret defaults ---
-      - key: DEMO_VPA
-        value: revive@upi
-      - key: LLM_BASE_URL
-        value: https://openrouter.ai/api/v1
-      - key: LLM_MODEL
-        value: minimax/minimax-01
-      - key: DATABASE_PATH
-        value: revenue_recovery.db
-      - key: MERCHANT_NAME
-        value: Merchant
-      - key: PROMISE_GRACE_MINUTES
-        value: "30"
-      # --- Fill AFTER landing URL exists ---
-      - key: ALLOWED_ORIGINS
         sync: false
 
   # ── Landing: Next.js (Node runtime) ────────────────────────────

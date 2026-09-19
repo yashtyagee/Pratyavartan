@@ -15,6 +15,7 @@ import ActiveRecoveries from "@/components/console/active-recoveries";
 import AuditLedger from "@/components/console/audit-ledger";
 import DecisionTraceModal from "@/components/console/decision-trace-modal";
 import ToastSystem, { ToastMessage } from "@/components/console/toast-system";
+import { EmployeeReportCard } from "@/components/console/employee-report-card";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 
 // Dynamic import of Three.js 3D Ledger with SSR disabled for optimal performance
@@ -51,6 +52,7 @@ export default function WarRoomConsolePage() {
   const [activeChartFilter, setActiveChartFilter] = useState<string | undefined>(undefined);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [pulseCount, setPulseCount] = useState(0);
+  const [showReportCard, setShowReportCard] = useState(false);
   const prevLogCountRef = useRef(0);
 
   // Trigger toast & 3D pulse when new audit events land
@@ -166,7 +168,11 @@ export default function WarRoomConsolePage() {
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
         {/* Row 1: KPI Cards */}
         <section aria-label="Key Performance Indicators">
-          <KPICards metrics={metrics} loading={!metrics && !isOffline} />
+          <KPICards
+            metrics={metrics}
+            loading={!metrics && !isOffline}
+            onOpenReportCard={() => setShowReportCard(true)}
+          />
         </section>
 
         {/* Row 2: Analytics Charts */}
@@ -226,6 +232,12 @@ export default function WarRoomConsolePage() {
 
       {/* Real-time Toast Notifications */}
       <ToastSystem toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Official AI Teammate Employee Report Card Modal */}
+      <EmployeeReportCard
+        isOpen={showReportCard}
+        onClose={() => setShowReportCard(false)}
+      />
     </div>
   );
 }

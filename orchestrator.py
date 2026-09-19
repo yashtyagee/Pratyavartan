@@ -215,6 +215,26 @@ def process_single_payment_workflow(
     action = diagnosis.action
     action_result: Dict[str, Any] = {}
 
+    # Step A2: Regulatory Compliance Gate (TRAI/TCCCPR & DPDP Act, 2023)
+    if action in ("SEND_UPI_INTENT", "SWITCH_INSTRUMENT"):
+        import compliance_gate
+        comp_gate = compliance_gate.check_compliance_gate(
+            payment_id=payment_id,
+            user_contact=payment.get("user_contact"),
+            correlation_id=cid,
+        )
+        if not comp_gate["passed"]:
+            logger.warning("[COMPLIANCE_BLOCK] Outreach blocked for %s: %s", payment_id, comp_gate["reason"])
+            db.update_payment_status(payment_id, "ESCALATED")
+            return {
+                "success": False,
+                "status": "BLOCKED",
+                "payment_id": payment_id,
+                "correlation_id": cid,
+                "reason": comp_gate["reason"],
+                "message": f"Outbound blocked by compliance gate: {comp_gate['reason']}",
+            }
+
     # Soundbox Whisper v2: Announce to merchant ONLY if payment is actively recoverable (ZERO voice on stopping-rule escalation)
     if action not in ("ESCALATE_HUMAN", "WAIT_AND_MONITOR"):
         try:

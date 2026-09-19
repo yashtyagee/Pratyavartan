@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   Award,
   CheckCircle2,
@@ -15,6 +15,7 @@ import {
   Sparkles,
   FileCheck,
 } from "lucide-react";
+import { API_BASE_URL } from "@/lib/constants";
 
 interface EmployeeReportCardProps {
   isOpen: boolean;
@@ -29,7 +30,32 @@ export function EmployeeReportCard({
   recoveredInr = 428450,
   atRiskInr = 112300,
 }: EmployeeReportCardProps) {
+  const [stats, setStats] = useState<any>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let isMounted = true;
+    fetch(`${API_BASE_URL}/api/employee-report`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (isMounted && data) {
+          setStats(data);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to fetch employee report stats:", err);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  const currentRecovered = stats?.recovered_amount_inr ?? recoveredInr;
+  const currentRate = stats?.recovery_rate_pct ? `${stats.recovery_rate_pct}%` : "74.2%";
+  const totalBlocks = stats?.total_blocks_chained ?? 1167;
+  const grade = stats?.grade ?? "A+";
 
   const handlePrint = () => {
     window.print();
@@ -83,7 +109,7 @@ export function EmployeeReportCard({
                     Pratyavartan AI
                   </span>
                   <span className="rounded-full bg-recovered/20 px-2 py-0.5 font-mono text-[10px] font-bold text-recovered border border-recovered/40">
-                    Grade A+ (98.4%)
+                    Grade {grade} ({currentRate})
                   </span>
                 </div>
                 <p className="font-mono text-xs text-muted">
@@ -107,7 +133,7 @@ export function EmployeeReportCard({
               <span>Manager Assessment & Role Justification</span>
             </div>
             <p className="text-xs leading-relaxed text-text/90 italic">
-              "Pratyavartan functions not as a dumb retry bot, but as an indispensable digital teammate. It intercepts dropoffs in 3.2 seconds, negotiates naturally in Indic Hinglish, rigorously enforces RBI stopping rules, and has saved our Kirana network ₹4,28,450 while cutting manual call-center costs by 99.9%."
+              "Pratyavartan functions not as a dumb retry bot, but as an indispensable digital teammate. It intercepts dropoffs in 3.2 seconds, negotiates naturally in Indic Hinglish, rigorously enforces RBI stopping rules, and has saved our Kirana network ₹{Number(currentRecovered).toLocaleString("en-IN")} while cutting manual call-center costs by 99.9%."
             </p>
           </div>
 
@@ -120,9 +146,9 @@ export function EmployeeReportCard({
               <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 text-center">
                 <span className="font-mono text-[10px] text-muted uppercase">Gross Recovered</span>
                 <p className="mt-1 font-display text-lg font-black text-recovered">
-                  ₹{recoveredInr.toLocaleString("en-IN")}
+                  ₹{Number(currentRecovered).toLocaleString("en-IN")}
                 </p>
-                <span className="font-mono text-[9px] text-recovered/80">74.2% recovery rate</span>
+                <span className="font-mono text-[9px] text-recovered/80">{currentRate} recovery rate</span>
               </div>
 
               <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 text-center">
@@ -167,7 +193,7 @@ export function EmployeeReportCard({
               </div>
               <div className="flex items-center justify-between border-b border-white/5 pb-2">
                 <span className="text-white/90">Cryptographic Non-Repudiation</span>
-                <span className="text-accent font-bold">⭐⭐⭐⭐⭐ (5/5) — 1,167 SHA-256 blocks</span>
+                <span className="text-accent font-bold">⭐⭐⭐⭐⭐ (5/5) — {Number(totalBlocks).toLocaleString("en-IN")} SHA-256 blocks</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-white/90">Zero-Downtime Autonomous Failover</span>

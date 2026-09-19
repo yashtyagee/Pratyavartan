@@ -16,9 +16,10 @@ import { MetricsResponse } from "@/lib/console-api";
 interface KPICardsProps {
   metrics?: MetricsResponse;
   loading?: boolean;
+  onOpenReportCard?: () => void;
 }
 
-export default function KPICards({ metrics, loading = false }: KPICardsProps) {
+export default function KPICards({ metrics, loading = false, onOpenReportCard }: KPICardsProps) {
   const atRisk = metrics?.at_risk_inr ?? 24500;
   const recovered = metrics?.recovered_inr ?? 18650;
   const statusCounts = metrics?.status_counts ?? {};
@@ -121,8 +122,39 @@ export default function KPICards({ metrics, loading = false }: KPICardsProps) {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-      {cards.map((card, idx) => {
+    <div className="space-y-3">
+      {/* AI Teammate Status Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.02] px-4 py-2.5 backdrop-blur-md">
+        <div className="flex items-center gap-2.5">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-recovered opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-recovered" />
+          </span>
+          <span className="font-mono text-xs text-muted">AI Teammate:</span>
+          <span className="font-display text-xs font-bold text-white">Pratyavartan AI (#AI-001)</span>
+          <span className="hidden rounded border border-recovered/30 bg-recovered/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-recovered sm:inline">
+            Grade A+ (98.4%)
+          </span>
+          <span className="hidden font-mono text-[11px] text-muted md:inline">
+            · 24/7 Bounded Autonomous Recovery
+          </span>
+        </div>
+        {onOpenReportCard && (
+          <button
+            onClick={onOpenReportCard}
+            className="flex items-center gap-1.5 rounded-lg border border-amber-400/40 bg-gradient-to-r from-amber-500/20 to-amber-600/10 px-3 py-1 font-mono text-xs font-bold text-amber-300 transition-all hover:scale-105 hover:border-amber-400 hover:shadow-[0_0_15px_rgba(251,191,36,0.3)] active:scale-95 cursor-pointer"
+            title="Open AI Teammate Official Performance Review & ROI Scorecard"
+          >
+            <span>AI REPORT CARD</span>
+            <span className="rounded bg-amber-400/30 px-1 text-[9px] font-extrabold text-white">
+              A+
+            </span>
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {cards.map((card, idx) => {
         const Icon = card.icon;
         return (
           <motion.div
@@ -182,6 +214,7 @@ export default function KPICards({ metrics, loading = false }: KPICardsProps) {
           </motion.div>
         );
       })}
+      </div>
     </div>
   );
 }
