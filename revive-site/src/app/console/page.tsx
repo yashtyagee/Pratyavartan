@@ -151,7 +151,7 @@ export default function WarRoomConsolePage() {
           <div className="mx-auto flex max-w-7xl items-center justify-center gap-2">
             <AlertTriangle className="h-4 w-4" />
             <span>
-              <strong>OFFLINE DEMO MODE:</strong> Backend at port 8010 is not reachable. Showing cached state and graceful fallback UI.
+              <strong>CONNECTING / WAKING UP:</strong> Backend service is waking up or temporarily unreachable. Showing cached state and graceful fallback UI.
             </span>
             <button
               onClick={refreshAll}

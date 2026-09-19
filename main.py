@@ -126,6 +126,8 @@ _default_origins = [
     "http://127.0.0.1:8080",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    "https://pratyavartan.vercel.app",
+    "https://pratyavartan-sable.vercel.app",
 ]
 env_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 allow_origins = list(set(_default_origins + env_origins))
@@ -133,7 +135,7 @@ allow_origins = list(set(_default_origins + env_origins))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.onrender\.com|http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
