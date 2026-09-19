@@ -1,57 +1,88 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { useState, useEffect } from 'react';
+import { motion, useScroll, useMotionValueEvent } from 'framer-motion';
+import { ArrowRight } from 'lucide-react';
+import Link from 'next/link';
+import { CONSOLE_URL } from '@/lib/constants';
 
-import { CONSOLE_URL } from "@/lib/constants";
-const LINKS = [
-  { label: "How it Works", href: "#how-it-works" },
-  { label: "Intelligence", href: "#intelligence" },
-  { label: "Recovery", href: "#recovery" },
-  { label: "Impact", href: "#impact" },
-];
+const SECTIONS = ["How It Works", "Intelligence", "Voice", "Orchestration", "Compliance", "Impact"];
 
-export default function Navbar() {
-  const [scrolled, setScrolled] = useState(false);
+export function Navbar() {
+  const { scrollY } = useScroll();
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [activeSection, setActiveSection] = useState("");
+
+  useMotionValueEvent(scrollY, "change", (latest) => {
+    setIsScrolled(latest > 80);
+  });
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 24);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    const observers: IntersectionObserver[] = [];
+    
+    SECTIONS.forEach(section => {
+      const id = section.toLowerCase().replace(/\s+/g, '-');
+      const el = document.getElementById(id);
+      
+      if (el) {
+        const observer = new IntersectionObserver(
+          ([entry]) => {
+            if (entry.isIntersecting) {
+              setActiveSection(section);
+            }
+          },
+          { rootMargin: '-40% 0px -40% 0px' }
+        );
+        observer.observe(el);
+        observers.push(observer);
+      }
+    });
+
+    return () => observers.forEach(o => o.disconnect());
   }, []);
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 flex justify-center px-4 pt-4">
-      <nav
-        aria-label="Primary"
-        className={`glass flex h-14 w-full max-w-6xl items-center justify-between rounded-full px-5 transition-all duration-500 ${
-          scrolled ? "shadow-[0_8px_40px_rgba(0,0,0,0.45)]" : ""
+    <motion.header
+      className="fixed top-0 left-0 right-0 z-50 flex justify-center pt-6 px-4"
+      initial={{ y: -100 }}
+      animate={{ y: 0 }}
+      transition={{ duration: 0.6, ease: "easeOut" }}
+    >
+      <motion.nav
+        className={`flex items-center justify-between px-6 py-3 rounded-full transition-all duration-300 ${
+          isScrolled 
+            ? 'glass shadow-2xl shadow-black/50 w-full max-w-5xl' 
+            : 'w-full max-w-7xl bg-transparent'
         }`}
+        layout
       >
-        <a href="#top" className="flex items-baseline gap-2">
-          <span className="grad-text font-display text-xl font-bold">प्रत्यावर्तन</span>
-          <span className="font-display text-sm font-medium tracking-[0.22em] text-white">PRAVART</span>
-        </a>
-
-        <div className="hidden items-center gap-7 md:flex">
-          {LINKS.map((l) => (
-            <a key={l.href} href={l.href} className="text-sm text-body/60 transition-colors hover:text-white">
-              {l.label}
-            </a>
+        <div className="font-display font-bold text-xl tracking-tight">
+          Pratyavartan
+        </div>
+        
+        <div className="hidden md:flex items-center space-x-8">
+          {SECTIONS.map((section) => (
+            <Link 
+              key={section} 
+              href={`#${section.toLowerCase().replace(/\s+/g, '-')}`}
+              className={`text-sm transition-colors duration-200 ${
+                activeSection === section ? 'text-accent font-medium' : 'text-muted hover:text-text'
+              }`}
+            >
+              {section}
+            </Link>
           ))}
         </div>
 
-        <a
+        <a 
           href={CONSOLE_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="group inline-flex items-center gap-2 rounded-full border border-teal/50 px-4 py-2 text-sm font-medium text-teal transition-colors hover:border-copper hover:text-copper"
+          className="group relative flex items-center gap-2 px-5 py-2 bg-text text-base rounded-full font-medium overflow-hidden transition-transform hover:scale-105 active:scale-95"
         >
-          Launch Console
-          <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
+          <span className="relative z-10">Launch War Room</span>
+          <ArrowRight className="w-4 h-4 relative z-10 transition-transform group-hover:translate-x-1" />
+          <div className="absolute inset-0 bg-accent opacity-0 group-hover:opacity-20 transition-opacity" />
         </a>
-      </nav>
-    </header>
+      </motion.nav>
+    </motion.header>
   );
 }

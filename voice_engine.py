@@ -31,7 +31,7 @@ def get_voice_engine_status() -> Dict[str, Any]:
     sarvam_key = os.getenv("SARVAM_API_KEY", "").strip()
     is_sarvam_active = bool(sarvam_key and sarvam_key.lower() not in ("dummy", "none", "unset", ""))
     return {
-        "primary_engine": "Sarvam AI (bulbul:v1)",
+        "primary_engine": "Sarvam AI (bulbul:v3)",
         "fallback_engine": "gTTS (Google Text-to-Speech)",
         "sarvam_configured": is_sarvam_active,
         "active_engine": "Sarvam AI" if is_sarvam_active else "gTTS Fallback",
@@ -89,16 +89,16 @@ def generate_hinglish_voice(
             }
             payload = {
                 "inputs": [script_clean],
-                "target_language_code": "en-IN",
-                "speaker": "meera",
+                "target_language_code": "hi-IN",
+                "speaker": "aditya",
                 "pitch": 0,
                 "pace": 1.0,
                 "loudness": 1.0,
-                "speech_sample_rate": 8000,
+                "speech_sample_rate": 22050,
                 "enable_preprocessing": True,
-                "model": "bulbul:v1",
+                "model": "bulbul:v3",
             }
-            with httpx.Client(timeout=5.0) as client:
+            with httpx.Client(timeout=10.0) as client:
                 resp = client.post(
                     "https://api.sarvam.ai/text-to-speech",
                     json=payload,
@@ -121,12 +121,13 @@ def generate_hinglish_voice(
                         payload={
                             "audio_url": sarvam_url,
                             "payment_id": payment_id,
-                            "provider": "Sarvam AI (bulbul:v1)",
-                            "model": "bulbul:v1",
-                            "language": "en-IN",
+                            "provider": "Sarvam AI (bulbul:v3)",
+                            "model": "bulbul:v3",
+                            "speaker": "aditya",
+                            "language": "hi-IN",
                             "script_length": len(script_clean),
                         },
-                        reasoning="Synthesized Hinglish voice audio negotiation note via Sarvam AI Indic TTS.",
+                        reasoning="Synthesized Hinglish voice audio negotiation note via Sarvam AI Indic TTS (bulbul:v3).",
                         severity="INFO",
                     )
                     logger.info("[VOICE_ENGINE] Successfully generated voice note via Sarvam AI for %s", payment_id)

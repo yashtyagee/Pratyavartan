@@ -207,7 +207,7 @@ def process_single_payment_workflow(
 
     amount = int(payment.get("amount", 0))
 
-    # Step A: Run Bounded AI Diagnosis
+    # Step A: Run Bounded AI Diagnosis & Hard Stopping Rules first
     diagnosis = ai_agent.process_failed_payment(payment_id=payment_id, correlation_id=cid)
     if not diagnosis:
         return {"success": False, "error": "AI diagnosis could not be completed"}
@@ -215,53 +215,108 @@ def process_single_payment_workflow(
     action = diagnosis.action
     action_result: Dict[str, Any] = {}
 
-    # Step B: Route Action according to AI Decision / Stopping Rules
-    if action == "SEND_UPI_INTENT":
-        # Dynamic Discount & Voice Negotiation for high-intent abandoned carts (>= Rs.5,000 / 5,00,000 paise)
-        if amount >= 500000:
-            try:
-                discount_info = ai_agent.generate_discount_offer(
-                    amount_paise=amount,
-                    error_type=diagnosis.diagnosis,
-                    correlation_id=cid,
-                    payment_id=payment_id,
-                )
-                final_amount = discount_info.get("final_amount_paise", amount)
-                disc_pct = discount_info.get("discount_percentage", 0)
-                disc_inr = discount_info.get("discount_amount_paise", 0) / 100.0
-                orig_inr = amount / 100.0
-                final_inr = final_amount / 100.0
+    # Soundbox Whisper v2: Announce to merchant ONLY if payment is actively recoverable (ZERO voice on stopping-rule escalation)
+    if action not in ("ESCALATE_HUMAN", "WAIT_AND_MONITOR"):
+        try:
+            amt_disp = f"₹{amount / 100:.2f}" if amount % 100 != 0 else f"₹{int(amount / 100):,}"
+            sb_script = f"Bhaiya, {amt_disp} ka payment fail hua hai — maine customer ko recovery link bhej diya hai."
+            sb_audio_url = razorpay_service.generate_voice_audio(
+                script=sb_script,
+                payment_id=payment_id,
+                correlation_id=cid,
+            )
+            db.log_event(
+                correlation_id=cid,
+                payment_id=payment_id,
+                event_type="SOUNDBOX_ANNOUNCE",
+                payload={
+                    "direction": "to_merchant",
+                    "script": sb_script,
+                    "audio_url": sb_audio_url,
+                    "amount_paise": amount,
+                },
+                reasoning="Soundbox Whisper broadcast: merchant notified of payment failure.",
+                severity="INFO",
+            )
+            db.insert_soundbox_log(
+                payment_id=payment_id,
+                direction="to_merchant",
+                script=sb_script,
+                audio_url=sb_audio_url,
+            )
+        except Exception as sb_err:
+            logger.warning("[SOUNDBOX_ANNOUNCE_WARN] Failed to broadcast soundbox failure announcement: %s", sb_err)
 
-                voice_script = ai_agent.generate_voice_script(
-                    customer_name="Valued Customer",
-                    original_inr=orig_inr,
-                    discount_inr=disc_inr,
-                    final_inr=final_inr,
-                    correlation_id=cid,
-                    payment_id=payment_id,
-                )
+    # Step B: ERV Guardrail & Threshold Evaluation
+    erv_threshold_inr = float(os.getenv("ERV_THRESHOLD_INR", "100"))
+    erv_info = diagnosis.erv or {}
+    erv_inr = erv_info.get("erv_inr", round((amount / 100.0) * 0.5, 2))
 
-                audio_url = razorpay_service.generate_voice_audio(
-                    script=voice_script,
-                    payment_id=payment_id,
-                    correlation_id=cid,
-                )
+    if erv_inr < erv_threshold_inr and action != "ESCALATE_HUMAN":
+        db.log_event(
+            correlation_id=cid,
+            payment_id=payment_id,
+            event_type="GUARDRAIL_BLOCK",
+            payload={
+                "erv_inr": erv_inr,
+                "erv_threshold_inr": erv_threshold_inr,
+                "amount_paise": amount,
+                "scenario": diagnosis.scenario,
+                "action": "IGNORE_LOW_ERV",
+            },
+            reasoning="below merchant ERV threshold",
+            severity="WARNING",
+        )
+        action = "IGNORE_LOW_ERV"
+        action_result = {
+            "success": True,
+            "action": "IGNORE_LOW_ERV",
+            "message": f"Outreach skipped: ERV ₹{erv_inr:.2f} is below merchant threshold ₹{erv_threshold_inr:.2f}.",
+            "erv": erv_info,
+        }
 
-                action_result = razorpay_service.handle_cart_drop(
-                    payment_id=payment_id,
-                    amount=amount,
-                    correlation_id=cid,
-                    final_amount_paise=final_amount,
-                    discount_percentage=disc_pct,
-                    voice_script=voice_script,
-                    audio_url=audio_url,
-                )
-            except Exception as discount_err:
-                logger.error("Discount/Voice workflow error for %s: %s", payment_id, discount_err)
-                action_result = razorpay_service.handle_cart_drop(
-                    payment_id=payment_id, amount=amount, correlation_id=cid
-                )
-        else:
+    # Step C: Route Action according to AI Decision / Stopping Rules
+    elif action == "SEND_UPI_INTENT":
+        try:
+            discount_info = ai_agent.generate_discount_offer(
+                amount_paise=amount,
+                error_type=diagnosis.diagnosis,
+                correlation_id=cid,
+                payment_id=payment_id,
+            )
+            final_amount = discount_info.get("final_amount_paise", amount)
+            disc_pct = discount_info.get("discount_percentage", 0)
+            disc_inr = discount_info.get("discount_amount_paise", 0) / 100.0
+            orig_inr = amount / 100.0
+            final_inr = final_amount / 100.0
+
+            voice_script = ai_agent.generate_voice_script(
+                customer_name="Valued Customer",
+                original_inr=orig_inr,
+                discount_inr=disc_inr,
+                final_inr=final_inr,
+                correlation_id=cid,
+                payment_id=payment_id,
+                diagnosis="CART_DROP",
+            )
+
+            audio_url = razorpay_service.generate_voice_audio(
+                script=voice_script,
+                payment_id=payment_id,
+                correlation_id=cid,
+            )
+
+            action_result = razorpay_service.handle_cart_drop(
+                payment_id=payment_id,
+                amount=amount,
+                correlation_id=cid,
+                final_amount_paise=final_amount,
+                discount_percentage=disc_pct,
+                voice_script=voice_script,
+                audio_url=audio_url,
+            )
+        except Exception as discount_err:
+            logger.error("Discount/Voice workflow error for %s: %s", payment_id, discount_err)
             action_result = razorpay_service.handle_cart_drop(
                 payment_id=payment_id, amount=amount, correlation_id=cid
             )
@@ -284,6 +339,7 @@ def process_single_payment_workflow(
                 payment_id=payment_id,
                 diagnosis="LOW_BALANCE",
                 original_error_code=original_error_code,
+                split_offer=diagnosis.split_offer,
             )
 
             audio_url = razorpay_service.generate_voice_audio(
@@ -307,6 +363,36 @@ def process_single_payment_workflow(
                 amount=amount,
                 correlation_id=cid,
             )
+    elif action == "NEGOTIATE_HOLD" or diagnosis.scenario == "SUPPLIER_FAIL":
+        merchant_name = os.getenv("MERCHANT_NAME", "Sharma Kirana Store")
+        supp_draft = ai_agent.generate_supplier_negotiation_draft(
+            merchant_name=merchant_name,
+            amount_inr=amount / 100.0,
+            correlation_id=cid,
+            payment_id=payment_id,
+        )
+        diagnosis.negotiation_draft = supp_draft
+        db.log_event(
+            correlation_id=cid,
+            payment_id=payment_id,
+            event_type="MESSAGE_SENT",
+            payload={
+                "channel": "supplier_channel",
+                "recipient": "Distributor/Supplier",
+                "message": supp_draft,
+                "link_source": "none",
+                "amount_inr": amount / 100.0,
+            },
+            reasoning="B2B Supplier order hold letter dispatched via supplier channel.",
+            severity="INFO",
+        )
+        action_result = {
+            "success": True,
+            "action": "NEGOTIATE_HOLD",
+            "message": "Supplier payment hold letter drafted and dispatched.",
+            "negotiation_draft": supp_draft,
+            "channel": "supplier_channel",
+        }
     elif action == "WAIT_AND_MONITOR":
         action_result = razorpay_service.handle_bank_down(
             payment_id=payment_id, correlation_id=cid

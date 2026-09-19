@@ -1,0 +1,184 @@
+{
+  "name": "Promise-to-Pay Orchestrator",
+  "active": true,
+  "versionId": "f7d54b20-1a2b-4c3d-8e5f-111111111111",
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Kolkata" },
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Promise-to-Pay Orchestrator\nAll mutations via FastAPI (:8010) — audit-safe, n8n never touches DB.\nRBI window clamped at ingestion (09:00–21:00 IST).\nContext preserved via 'Init Context' node across all HTTP hops.\nError branch: voice failure does NOT kill the flow — grace period continues.",
+        "height": 380, "width": 400
+      },
+      "id": "sticky-main", "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote", "typeVersion": 1,
+      "position": [-480, -120]
+    },
+    {
+      "parameters": { "httpMethod": "POST", "path": "promise-to-pay", "responseMode": "onReceived", "options": {} },
+      "id": "wh-1", "name": "Promise Dispatched",
+      "type": "n8n-nodes-base.webhook", "typeVersion": 2,
+      "position": [-400, 200], "webhookId": "promise-to-pay"
+    },
+    {
+      "parameters": {
+        "assignments": { "assignments": [
+          { "id": "a1", "name": "api_base", "type": "string", "value": "http://localhost:8010" },
+          { "id": "a2", "name": "payment_id", "type": "string", "value": "={{ $json.body.payment_id }}" },
+          { "id": "a3", "name": "correlation_id", "type": "string", "value": "={{ $json.body.correlation_id }}" },
+          { "id": "a4", "name": "remind_at", "type": "string", "value": "={{ $json.body.remind_at }}" }
+        ]},
+        "options": {}
+      },
+      "id": "set-1", "name": "Init Context",
+      "type": "n8n-nodes-base.set", "typeVersion": 3.4,
+      "position": [-180, 200]
+    },
+    {
+      "parameters": { "resume": "specificTime", "dateTime": "={{ $json.remind_at }}", "timezone": "Asia/Kolkata", "options": {} },
+      "id": "wait-1", "name": "Wait until Promise Time (IST)",
+      "type": "n8n-nodes-base.wait", "typeVersion": 1.1,
+      "position": [40, 200], "webhookId": "auto-wait-1"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Init Context').item.json.api_base }}/api/payment/{{ $('Init Context').item.json.payment_id }}/status",
+        "options": { "timeout": 5000 }
+      },
+      "id": "http-1", "name": "Check Payment Status #1",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [260, 200],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.status }}", "rightValue": "RECOVERED",
+              "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-1", "name": "Recovered already?",
+      "type": "n8n-nodes-base.if", "typeVersion": 2.2,
+      "position": [480, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Init Context').item.json.api_base }}/api/log-promise-kept",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ payment_id: $('Init Context').item.json.payment_id, correlation_id: $('Init Context').item.json.correlation_id, status: 'kept' }) }}",
+        "options": { "timeout": 5000 }
+      },
+      "id": "http-kept", "name": "Log Promise Kept",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [740, 60],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Init Context').item.json.api_base }}/api/trigger-voice-reminder",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ payment_id: $('Init Context').item.json.payment_id, correlation_id: $('Init Context').item.json.correlation_id }) }}",
+        "options": { "timeout": 8000 }
+      },
+      "id": "http-voice", "name": "Send Hinglish Voice Reminder",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [740, 300],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {},
+      "id": "noop-voicefail", "name": "Voice Failed — Log & Continue Grace",
+      "type": "n8n-nodes-base.noOp", "typeVersion": 1,
+      "position": [980, 440]
+    },
+    {
+      "parameters": { "resume": "timeInterval", "amount": 30, "unit": "minutes", "options": {} },
+      "id": "wait-grace", "name": "Grace Period: 30 minutes",
+      "type": "n8n-nodes-base.wait", "typeVersion": 1.1,
+      "position": [1220, 300], "webhookId": "auto-wait-grace"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Init Context').item.json.api_base }}/api/payment/{{ $('Init Context').item.json.payment_id }}/status",
+        "options": { "timeout": 5000 }
+      },
+      "id": "http-2", "name": "Check Payment Status #2",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [1440, 300],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            { "id": "c2", "leftValue": "={{ $json.status }}", "rightValue": "RECOVERED",
+              "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-2", "name": "Recovered in grace?",
+      "type": "n8n-nodes-base.if", "typeVersion": 2.2,
+      "position": [1660, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Init Context').item.json.api_base }}/api/escalate-human",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ payment_id: $('Init Context').item.json.payment_id, correlation_id: $('Init Context').item.json.correlation_id, reason: 'promise_broken_grace_expired' }) }}",
+        "options": { "timeout": 5000 }
+      },
+      "id": "http-esc", "name": "Escalate to Human",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [1900, 440],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {},
+      "id": "noop-done", "name": "Workflow Resolved",
+      "type": "n8n-nodes-base.noOp", "typeVersion": 1,
+      "position": [2140, 200]
+    }
+  ],
+  "connections": {
+    "Promise Dispatched": { "main": [[{ "node": "Init Context", "type": "main", "index": 0 }]] },
+    "Init Context": { "main": [[{ "node": "Wait until Promise Time (IST)", "type": "main", "index": 0 }]] },
+    "Wait until Promise Time (IST)": { "main": [[{ "node": "Check Payment Status #1", "type": "main", "index": 0 }]] },
+    "Check Payment Status #1": { "main": [[{ "node": "Recovered already?", "type": "main", "index": 0 }]] },
+    "Recovered already?": {
+      "main": [
+        [{ "node": "Log Promise Kept", "type": "main", "index": 0 }],
+        [{ "node": "Send Hinglish Voice Reminder", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Hinglish Voice Reminder": {
+      "main": [
+        [{ "node": "Grace Period: 30 minutes", "type": "main", "index": 0 }],
+        [{ "node": "Voice Failed — Log & Continue Grace", "type": "main", "index": 0 }]
+      ]
+    },
+    "Voice Failed — Log & Continue Grace": { "main": [[{ "node": "Grace Period: 30 minutes", "type": "main", "index": 0 }]] },
+    "Grace Period: 30 minutes": { "main": [[{ "node": "Check Payment Status #2", "type": "main", "index": 0 }]] },
+    "Check Payment Status #2": { "main": [[{ "node": "Recovered in grace?", "type": "main", "index": 0 }]] },
+    "Recovered in grace?": {
+      "main": [
+        [{ "node": "Log Promise Kept", "type": "main", "index": 0 }],
+        [{ "node": "Escalate to Human", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Promise Kept": { "main": [[{ "node": "Workflow Resolved", "type": "main", "index": 0 }]] },
+    "Escalate to Human": { "main": [[{ "node": "Workflow Resolved", "type": "main", "index": 0 }]] }
+  }
+}

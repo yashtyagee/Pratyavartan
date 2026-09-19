@@ -416,6 +416,17 @@ def handle_low_balance(
                 severity="WARNING",
             )
 
+    # PART 2: Auto-split Postpaid Rescue for INSUFFICIENT_BALANCE >= 20000 paise (Rs.200)
+    split_offer = None
+    if is_insufficient and amount >= 20000:
+        split_offer = {
+            "upi_paise": int(amount * 0.40),
+            "postpaid_paise": int(amount * 0.60),
+            "note": "illustrative",
+            "upi_inr": round((amount * 0.40) / 100.0, 2),
+            "postpaid_inr": round((amount * 0.60) / 100.0, 2),
+        }
+
     payload_data = {
         "action": "SWITCH_INSTRUMENT",
         "scenario": scenario,
@@ -432,6 +443,8 @@ def handle_low_balance(
         "voice_script": voice_script,
         "audio_url": audio_url,
     }
+    if split_offer:
+        payload_data["split_offer"] = split_offer
     if upi_intent_uri:
         payload_data["upi_intent_uri"] = upi_intent_uri
 
@@ -439,6 +452,8 @@ def handle_low_balance(
         api_reasoning = "One-Click Recovery Link generated with UPI_LIMIT instrument switch (UPI/Wallet blocked, Card/EMI provisioned, full amount preserved)."
     else:
         api_reasoning = "Persona-aware recovery for INSUFFICIENT_BALANCE: UPI stays ENABLED. Raw upi:// intent URI generated (auto-opens the customer's UPI app, amount pre-filled) + unrestricted Razorpay link dispatched alongside. Zero discount."
+        if split_offer:
+            api_reasoning += " Paytm Postpaid auto-split rescue offered (40% UPI / 60% Postpaid)."
 
     db.log_event(
         correlation_id=correlation_id,
@@ -453,7 +468,7 @@ def handle_low_balance(
         correlation_id=correlation_id,
         payment_id=payment_id,
         event_type="MESSAGE_SENT",
-        payload={"channel": "SMS/WhatsApp", "link": payment_link_url, "upi_intent_uri": upi_intent_uri or "", "upi_enabled": is_insufficient, "audio_url": audio_url, "one_click": True, "scenario": scenario, "simulated": payment_link_simulated},
+        payload={"channel": "SMS/WhatsApp", "link": payment_link_url, "upi_intent_uri": upi_intent_uri or "", "upi_enabled": is_insufficient, "audio_url": audio_url, "one_click": True, "scenario": scenario, "simulated": payment_link_simulated, "split_offer": split_offer},
         reasoning="One-Click recovery link dispatched to customer (persona-aware instrument routing).",
         severity="INFO",
     )
@@ -473,6 +488,7 @@ def handle_low_balance(
         "upi_enabled": is_insufficient,
         "upi_intent_uri": upi_intent_uri or "",
         "final_amount_paise": amount,
+        "split_offer": split_offer,
         "voice_script": voice_script,
         "audio_url": audio_url,
     }

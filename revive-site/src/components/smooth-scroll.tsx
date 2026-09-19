@@ -1,33 +1,34 @@
 "use client";
 
-import { useEffect } from "react";
-import Lenis from "lenis";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { useEffect, useRef } from 'react';
+import Lenis from 'lenis';
+import { useAnimationFrame } from 'framer-motion';
+import { useReducedMotion } from '@/lib/use-reduced-motion';
 
-/**
- * ONE continuous scroll story: Lenis smooth scroll driven by the GSAP ticker,
- * so ScrollTrigger scrub timelines and Lenis share a single rAF heartbeat.
- * Disabled entirely under prefers-reduced-motion.
- */
-export default function SmoothScroll({ children }: { children: React.ReactNode }) {
+export function SmoothScroll({ children }: { children: React.ReactNode }) {
+  const lenisRef = useRef<Lenis | null>(null);
+  const prefersReducedMotion = useReducedMotion();
+
   useEffect(() => {
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduced) return;
+    if (prefersReducedMotion) return;
 
-    gsap.registerPlugin(ScrollTrigger);
+    const lenis = new Lenis({
+      lerp: 0.08,
+      smoothWheel: true,
+    });
 
-    const lenis = new Lenis({ lerp: 0.1, wheelMultiplier: 1, anchors: true });
-    lenis.on("scroll", ScrollTrigger.update);
-    const raf = (time: number) => lenis.raf(time * 1000);
-    gsap.ticker.add(raf);
-    gsap.ticker.lagSmoothing(0);
+    lenisRef.current = lenis;
 
     return () => {
-      gsap.ticker.remove(raf);
       lenis.destroy();
     };
-  }, []);
+  }, [prefersReducedMotion]);
+
+  useAnimationFrame((time) => {
+    if (lenisRef.current) {
+      lenisRef.current.raf(time);
+    }
+  });
 
   return <>{children}</>;
 }

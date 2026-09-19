@@ -1,18 +1,19 @@
-"use client";
+import { useState, useEffect } from 'react';
 
-import { useEffect, useState } from "react";
-
-/** Honors prefers-reduced-motion across all sections. */
-export function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
+export function useReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
 
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReduced(mq.matches);
-    const onChange = (e: MediaQueryListEvent) => setReduced(e.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setPrefersReducedMotion(mediaQuery.matches);
+
+    const handleChange = (e: MediaQueryListEvent) => {
+      setPrefersReducedMotion(e.matches);
+    };
+
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
 
-  return reduced;
+  return prefersReducedMotion;
 }

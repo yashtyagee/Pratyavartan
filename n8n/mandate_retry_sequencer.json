@@ -1,371 +1,237 @@
 {
-  "name": "Pratyavartan - Mandate Retry Sequencer",
+  "name": "Mandate Retry Sequencer",
+  "active": true,
+  "versionId": "f7d54b20-1a2b-4c3d-8e5f-222222222222",
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Kolkata" },
   "nodes": [
     {
       "parameters": {
-        "httpMethod": "POST",
-        "path": "mandate-retry-trigger",
-        "responseMode": "responseNode",
-        "options": {}
+        "content": "## Mandate Retry Sequencer\n3 RBI-spaced attempts, HARD CAP — a 4th attempt node does not exist.\nT+1 10:30 IST → T+2 10:30 IST → 1st of next month 10:30 IST.\nRecovery mid-sequence → backend auto-cancels remaining (MANDATE_CANCELLED).",
+        "height": 320, "width": 400
       },
-      "id": "node-webhook-trigger",
-      "name": "Webhook Trigger (from FastAPI)",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [180, 300],
-      "webhookId": "mandate-retry-trigger"
+      "id": "sticky-m", "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote", "typeVersion": 1,
+      "position": [-480, -100]
+    },
+    {
+      "parameters": { "httpMethod": "POST", "path": "mandate-retry", "responseMode": "onReceived", "options": {} },
+      "id": "wh-m", "name": "Mandate Failure Dispatched",
+      "type": "n8n-nodes-base.webhook", "typeVersion": 2,
+      "position": [-400, 200], "webhookId": "mandate-retry"
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "{\n  \"status\": \"accepted\",\n  \"dispatched\": true,\n  \"workflow\": \"mandate_retry_sequencer\"\n}",
+        "assignments": { "assignments": [
+          { "id": "b1", "name": "api_base", "type": "string", "value": "http://localhost:8010" },
+          { "id": "b2", "name": "payment_id", "type": "string", "value": "={{ $json.body.payment_id }}" },
+          { "id": "b3", "name": "correlation_id", "type": "string", "value": "={{ $json.body.correlation_id }}" }
+        ]},
         "options": {}
       },
-      "id": "node-respond-webhook",
-      "name": "Acknowledge FastAPI",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [400, 180]
+      "id": "set-m", "name": "Init Context",
+      "type": "n8n-nodes-base.set", "typeVersion": 3.4,
+      "position": [-180, 200]
     },
     {
       "parameters": {
-        "amount": "={{ $json.body.a1_utc }}",
-        "unit": "seconds"
+        "resume": "specificTime",
+        "dateTime": "={{ $now.setZone('Asia/Kolkata').plus({ days: 1 }).set({ hour: 10, minute: 30, second: 0, millisecond: 0 }).toISO() }}",
+        "timezone": "Asia/Kolkata", "options": {}
       },
-      "id": "node-wait-attempt-1",
-      "name": "Wait for Attempt 1 (Tomorrow 10:30 AM IST)",
-      "type": "n8n-nodes-base.wait",
-      "typeVersion": 1.1,
-      "position": [400, 380]
+      "id": "wait-m1", "name": "Until Tomorrow 10:30 IST",
+      "type": "n8n-nodes-base.wait", "typeVersion": 1.1,
+      "position": [40, 200], "webhookId": "auto-wait-m1"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/mandates/attempt",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"attempt_no\": 1,\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
-        "options": {}
+        "url": "={{ $('Init Context').item.json.api_base }}/api/mandates/attempt",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ payment_id: $('Init Context').item.json.payment_id, correlation_id: $('Init Context').item.json.correlation_id, attempt_no: 1 }) }}",
+        "options": { "timeout": 5000 }
       },
-      "id": "node-mandate-attempt-1",
-      "name": "Execute Mandate Attempt 1",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [620, 380]
+      "id": "http-m1", "name": "Mandate Attempt 1",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [260, 200],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/payment/{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}/status",
-        "options": {}
+        "url": "={{ $('Init Context').item.json.api_base }}/api/payment/{{ $('Init Context').item.json.payment_id }}/status",
+        "options": { "timeout": 5000 }
       },
-      "id": "node-check-status-1",
-      "name": "Check Status (After Attempt 1)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [840, 380]
+      "id": "chk-m1", "name": "Check Status #1",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [460, 200],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000
     },
     {
       "parameters": {
         "conditions": {
-          "string": [
-            {
-              "value1": "={{ $json.status }}",
-              "value2": "RECOVERED"
-            }
-          ]
-        }
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            { "id": "m1", "leftValue": "={{ $json.status }}", "rightValue": "RECOVERED",
+              "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
-      "id": "node-if-recovered-1",
-      "name": "Is Recovered? (Attempt 1)",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [1060, 380]
+      "id": "if-m1", "name": "Recovered after Attempt 1?",
+      "type": "n8n-nodes-base.if", "typeVersion": 2.2,
+      "position": [660, 200]
     },
     {
       "parameters": {
-        "amount": "={{ $('Webhook Trigger (from FastAPI)').item.json.body.a2_utc }}",
-        "unit": "seconds"
+        "resume": "specificTime",
+        "dateTime": "={{ $now.setZone('Asia/Kolkata').plus({ days: 2 }).set({ hour: 10, minute: 30, second: 0, millisecond: 0 }).toISO() }}",
+        "timezone": "Asia/Kolkata", "options": {}
       },
-      "id": "node-wait-attempt-2",
-      "name": "Wait for Attempt 2 (Day-After 10:30 AM IST)",
-      "type": "n8n-nodes-base.wait",
-      "typeVersion": 1.1,
-      "position": [1280, 480]
+      "id": "wait-m2", "name": "Until Day-After 10:30 IST",
+      "type": "n8n-nodes-base.wait", "typeVersion": 1.1,
+      "position": [880, 300], "webhookId": "auto-wait-m2"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/mandates/attempt",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"attempt_no\": 2,\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
-        "options": {}
+        "url": "={{ $('Init Context').item.json.api_base }}/api/mandates/attempt",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ payment_id: $('Init Context').item.json.payment_id, correlation_id: $('Init Context').item.json.correlation_id, attempt_no: 2 }) }}",
+        "options": { "timeout": 5000 }
       },
-      "id": "node-mandate-attempt-2",
-      "name": "Execute Mandate Attempt 2",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1500, 480]
+      "id": "http-m2", "name": "Mandate Attempt 2",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [1100, 300],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/payment/{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}/status",
-        "options": {}
+        "url": "={{ $('Init Context').item.json.api_base }}/api/payment/{{ $('Init Context').item.json.payment_id }}/status",
+        "options": { "timeout": 5000 }
       },
-      "id": "node-check-status-2",
-      "name": "Check Status (After Attempt 2)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1720, 480]
+      "id": "chk-m2", "name": "Check Status #2",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [1300, 300],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000
     },
     {
       "parameters": {
         "conditions": {
-          "string": [
-            {
-              "value1": "={{ $json.status }}",
-              "value2": "RECOVERED"
-            }
-          ]
-        }
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            { "id": "m2", "leftValue": "={{ $json.status }}", "rightValue": "RECOVERED",
+              "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
-      "id": "node-if-recovered-2",
-      "name": "Is Recovered? (Attempt 2)",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [1940, 480]
+      "id": "if-m2", "name": "Recovered after Attempt 2?",
+      "type": "n8n-nodes-base.if", "typeVersion": 2.2,
+      "position": [1500, 300]
     },
     {
       "parameters": {
-        "amount": "={{ $('Webhook Trigger (from FastAPI)').item.json.body.a3_utc }}",
-        "unit": "seconds"
+        "resume": "specificTime",
+        "dateTime": "={{ $now.setZone('Asia/Kolkata').plus({ months: 1 }).set({ day: 1, hour: 10, minute: 30, second: 0, millisecond: 0 }).toISO() }}",
+        "timezone": "Asia/Kolkata", "options": {}
       },
-      "id": "node-wait-attempt-3",
-      "name": "Wait for Attempt 3 (1st of Next Month 10:30 AM IST)",
-      "type": "n8n-nodes-base.wait",
-      "typeVersion": 1.1,
-      "position": [2160, 580]
+      "id": "wait-m3", "name": "Until 1st of Next Month 10:30 IST",
+      "type": "n8n-nodes-base.wait", "typeVersion": 1.1,
+      "position": [1720, 400], "webhookId": "auto-wait-m3"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/mandates/attempt",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"attempt_no\": 3,\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
-        "options": {}
+        "url": "={{ $('Init Context').item.json.api_base }}/api/mandates/attempt",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ payment_id: $('Init Context').item.json.payment_id, correlation_id: $('Init Context').item.json.correlation_id, attempt_no: 3 }) }}",
+        "options": { "timeout": 5000 }
       },
-      "id": "node-mandate-attempt-3",
-      "name": "Execute Mandate Attempt 3",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [2380, 580]
+      "id": "http-m3", "name": "Mandate Attempt 3 (FINAL)",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [1940, 400],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/payment/{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}/status",
-        "options": {}
+        "url": "={{ $('Init Context').item.json.api_base }}/api/payment/{{ $('Init Context').item.json.payment_id }}/status",
+        "options": { "timeout": 5000 }
       },
-      "id": "node-check-status-3",
-      "name": "Check Status (After Attempt 3)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [2600, 580]
+      "id": "chk-m3", "name": "Check Status #3",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [2140, 400],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000
     },
     {
       "parameters": {
         "conditions": {
-          "string": [
-            {
-              "value1": "={{ $json.status }}",
-              "value2": "RECOVERED"
-            }
-          ]
-        }
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            { "id": "m3", "leftValue": "={{ $json.status }}", "rightValue": "RECOVERED",
+              "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
-      "id": "node-if-recovered-3",
-      "name": "Is Recovered? (Attempt 3)",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [2820, 580]
+      "id": "if-m3", "name": "Recovered after Attempt 3?",
+      "type": "n8n-nodes-base.if", "typeVersion": 2.2,
+      "position": [2340, 400]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.FASTAPI_BASE_URL || 'http://localhost:8010' }}/api/escalate-human",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"payment_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.payment_id }}\",\n  \"reason\": \"Mandate retry sequence exhausted: 3 debit attempts failed across RBI schedule windows.\",\n  \"correlation_id\": \"{{ $('Webhook Trigger (from FastAPI)').item.json.body.correlation_id }}\"\n}",
-        "options": {}
+        "url": "={{ $('Init Context').item.json.api_base }}/api/escalate-human",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ payment_id: $('Init Context').item.json.payment_id, correlation_id: $('Init Context').item.json.correlation_id, reason: 'mandate_attempts_exhausted' }) }}",
+        "options": { "timeout": 5000 }
       },
-      "id": "node-escalate-human",
-      "name": "Escalate to Human (Exhausted)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [3060, 680]
+      "id": "http-mesc", "name": "Escalate: Attempts Exhausted",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [2580, 520],
+      "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {},
+      "id": "noop-mend", "name": "Sequencer Resolved",
+      "type": "n8n-nodes-base.noOp", "typeVersion": 1,
+      "position": [2820, 300]
     }
   ],
   "connections": {
-    "Webhook Trigger (from FastAPI)": {
+    "Mandate Failure Dispatched": { "main": [[{ "node": "Init Context", "type": "main", "index": 0 }]] },
+    "Init Context": { "main": [[{ "node": "Until Tomorrow 10:30 IST", "type": "main", "index": 0 }]] },
+    "Until Tomorrow 10:30 IST": { "main": [[{ "node": "Mandate Attempt 1", "type": "main", "index": 0 }]] },
+    "Mandate Attempt 1": { "main": [[{ "node": "Check Status #1", "type": "main", "index": 0 }]] },
+    "Check Status #1": { "main": [[{ "node": "Recovered after Attempt 1?", "type": "main", "index": 0 }]] },
+    "Recovered after Attempt 1?": {
       "main": [
-        [
-          {
-            "node": "Acknowledge FastAPI",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Wait for Attempt 1 (Tomorrow 10:30 AM IST)",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Sequencer Resolved", "type": "main", "index": 0 }],
+        [{ "node": "Until Day-After 10:30 IST", "type": "main", "index": 0 }]
       ]
     },
-    "Wait for Attempt 1 (Tomorrow 10:30 AM IST)": {
+    "Until Day-After 10:30 IST": { "main": [[{ "node": "Mandate Attempt 2", "type": "main", "index": 0 }]] },
+    "Mandate Attempt 2": { "main": [[{ "node": "Check Status #2", "type": "main", "index": 0 }]] },
+    "Check Status #2": { "main": [[{ "node": "Recovered after Attempt 2?", "type": "main", "index": 0 }]] },
+    "Recovered after Attempt 2?": {
       "main": [
-        [
-          {
-            "node": "Execute Mandate Attempt 1",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Sequencer Resolved", "type": "main", "index": 0 }],
+        [{ "node": "Until 1st of Next Month 10:30 IST", "type": "main", "index": 0 }]
       ]
     },
-    "Execute Mandate Attempt 1": {
+    "Until 1st of Next Month 10:30 IST": { "main": [[{ "node": "Mandate Attempt 3 (FINAL)", "type": "main", "index": 0 }]] },
+    "Mandate Attempt 3 (FINAL)": { "main": [[{ "node": "Check Status #3", "type": "main", "index": 0 }]] },
+    "Check Status #3": { "main": [[{ "node": "Recovered after Attempt 3?", "type": "main", "index": 0 }]] },
+    "Recovered after Attempt 3?": {
       "main": [
-        [
-          {
-            "node": "Check Status (After Attempt 1)",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Sequencer Resolved", "type": "main", "index": 0 }],
+        [{ "node": "Escalate: Attempts Exhausted", "type": "main", "index": 0 }]
       ]
     },
-    "Check Status (After Attempt 1)": {
-      "main": [
-        [
-          {
-            "node": "Is Recovered? (Attempt 1)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Is Recovered? (Attempt 1)": {
-      "main": [
-        [],
-        [
-          {
-            "node": "Wait for Attempt 2 (Day-After 10:30 AM IST)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Wait for Attempt 2 (Day-After 10:30 AM IST)": {
-      "main": [
-        [
-          {
-            "node": "Execute Mandate Attempt 2",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Execute Mandate Attempt 2": {
-      "main": [
-        [
-          {
-            "node": "Check Status (After Attempt 2)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Check Status (After Attempt 2)": {
-      "main": [
-        [
-          {
-            "node": "Is Recovered? (Attempt 2)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Is Recovered? (Attempt 2)": {
-      "main": [
-        [],
-        [
-          {
-            "node": "Wait for Attempt 3 (1st of Next Month 10:30 AM IST)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Wait for Attempt 3 (1st of Next Month 10:30 AM IST)": {
-      "main": [
-        [
-          {
-            "node": "Execute Mandate Attempt 3",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Execute Mandate Attempt 3": {
-      "main": [
-        [
-          {
-            "node": "Check Status (After Attempt 3)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Check Status (After Attempt 3)": {
-      "main": [
-        [
-          {
-            "node": "Is Recovered? (Attempt 3)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Is Recovered? (Attempt 3)": {
-      "main": [
-        [],
-        [
-          {
-            "node": "Escalate to Human (Exhausted)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "pratyavartan-n8n-instance-01"
+    "Escalate: Attempts Exhausted": { "main": [[{ "node": "Sequencer Resolved", "type": "main", "index": 0 }]] }
   }
 }

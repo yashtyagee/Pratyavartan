@@ -1,0 +1,10 @@
+{
+  "name": "pratyavartan",
+  "private": true,
+  "scripts": {
+    "backend": "python -m uvicorn main:app --host 0.0.0.0 --port 8010",
+    "n8n": "npx n8n",
+    "n8n:setup": "node scripts/setup-n8n.mjs",
+    "n8n:test": "node scripts/test-n8n.mjs"
+  }
+}

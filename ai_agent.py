@@ -147,14 +147,17 @@ class AIDiagnosis(BaseModel):
     """
     Structured, strictly validated output of the AI revenue diagnostic model.
     """
-    diagnosis: Literal["BANK_DOWN", "CART_DROP", "LOW_BALANCE", "UNKNOWN"]
-    action: Literal["WAIT_AND_MONITOR", "SEND_UPI_INTENT", "SWITCH_INSTRUMENT", "ESCALATE_HUMAN"]
+    diagnosis: Literal["BANK_DOWN", "CART_DROP", "LOW_BALANCE", "SUPPLIER_FAIL", "UNKNOWN"]
+    action: Literal["WAIT_AND_MONITOR", "SEND_UPI_INTENT", "SWITCH_INSTRUMENT", "NEGOTIATE_HOLD", "MANDATE_RETRY", "ESCALATE_HUMAN", "IGNORE_LOW_ERV"]
     reasoning: str
     confidence: float = Field(ge=0.0, le=1.0)
     scenario: Optional[str] = None
     blocked_methods: Optional[List[str]] = None
     enabled_methods: Optional[List[str]] = None
     upi_intent_uri: Optional[str] = None
+    erv: Optional[Dict[str, Any]] = None
+    split_offer: Optional[Dict[str, Any]] = None
+    negotiation_draft: Optional[str] = None
 
 
 # System Prompt optimized for Llama 3.3 70B and OpenAI models with strict schema definitions
@@ -171,16 +174,19 @@ DIAGNOSIS AND ACTION TAXONOMY:
 3. LOW_BALANCE: error contains 'insufficient', 'limit_exceeded', 'daily_limit', 'upi_limit', 'balance'
    → action: SWITCH_INSTRUMENT (disable failing UPI, offer Card/EMI/PayLater link)
    → scenario: UPI_LIMIT (if daily limit reached) OR INSUFFICIENT_BALANCE (if low account balance)
-4. UNKNOWN: anything else
+4. SUPPLIER_FAIL: error contains 'supplier', 'distributor', 'vendor'
+   → action: NEGOTIATE_HOLD (negotiate temporary order dispatch hold with distributor)
+   → scenario: SUPPLIER_FAIL
+5. UNKNOWN: anything else
    → action: ESCALATE_HUMAN
    → scenario: UNKNOWN
 
 JSON SCHEMA REQUIREMENT:
 You MUST return a valid JSON object matching this exact schema:
 {
-  "diagnosis": "BANK_DOWN" | "CART_DROP" | "LOW_BALANCE" | "UNKNOWN",
-  "action": "WAIT_AND_MONITOR" | "SEND_UPI_INTENT" | "SWITCH_INSTRUMENT" | "ESCALATE_HUMAN",
-  "scenario": "BANK_DOWN" | "CART_ABANDONMENT" | "UPI_LIMIT" | "INSUFFICIENT_BALANCE" | "UNKNOWN",
+  "diagnosis": "BANK_DOWN" | "CART_DROP" | "LOW_BALANCE" | "SUPPLIER_FAIL" | "UNKNOWN",
+  "action": "WAIT_AND_MONITOR" | "SEND_UPI_INTENT" | "SWITCH_INSTRUMENT" | "NEGOTIATE_HOLD" | "ESCALATE_HUMAN",
+  "scenario": "BANK_DOWN" | "CART_ABANDONMENT" | "UPI_LIMIT" | "INSUFFICIENT_BALANCE" | "SUPPLIER_FAIL" | "UNKNOWN",
   "reasoning": "<Short explanatory rationale>",
   "confidence": <float between 0.0 and 1.0>
 }
@@ -204,44 +210,190 @@ REQUIREMENTS:
 
 def map_scenario(error_code: str = "", reasoning: str = "") -> str:
     """
-    SCENARIO MAPPING — deterministic keyword scan on error_code + reasoning,
-    IN THIS EXACT ORDER (first match wins):
-    1. "limit" → UPI_LIMIT
-    2. "insufficient" OR "balance" → INSUFFICIENT_BALANCE
-    3. "qr" OR "scan" OR "cart" OR "abandon" → CART_ABANDONMENT
-    4. "mandate" OR "autopay" → MANDATE_FAIL
-    5. "bank" OR "gateway" → BANK_DOWN
-    else → UNKNOWN.
-    LLM may refine reasoning text but NEVER the scenario field — scenario
-    comes ONLY from this deterministic map (auditability > cleverness).
+    SCENARIO MAPPING — deterministic keyword scan on error_code first (source of truth),
+    then fallback to reasoning:
+    1. error_code check (gateway/timeout -> BANK_DOWN, etc.)
+    2. combined text check
     """
-    combined = f"{error_code} {reasoning}".lower()
+    err_l = str(error_code or "").lower()
+    rsn_l = str(reasoning or "").lower()
+
+    # Priority 1: Direct error_code classification
+    if "supplier" in err_l or "distributor" in err_l:
+        return "SUPPLIER_FAIL"
+    if "limit" in err_l:
+        return "UPI_LIMIT"
+    if "insufficient" in err_l or "balance" in err_l:
+        return "INSUFFICIENT_BALANCE"
+    if "gateway" in err_l or "bank" in err_l or "timeout" in err_l or "network" in err_l or "server_error" in err_l:
+        return "BANK_DOWN"
+    if "mandate" in err_l or "autopay" in err_l:
+        return "MANDATE_FAIL"
+    if "qr" in err_l or "scan" in err_l or "cart" in err_l or "abandon" in err_l:
+        return "CART_ABANDONMENT"
+
+    # Priority 2: Combined text check
+    combined = f"{err_l} {rsn_l}".lower()
+    if "supplier" in combined or "distributor" in combined:
+        return "SUPPLIER_FAIL"
     if "limit" in combined:
         return "UPI_LIMIT"
     if "insufficient" in combined or "balance" in combined:
         return "INSUFFICIENT_BALANCE"
-    if "qr" in combined or "scan" in combined or "cart" in combined or "abandon" in combined:
-        return "CART_ABANDONMENT"
+    if "bank" in combined or "gateway" in combined or "npci" in combined:
+        return "BANK_DOWN"
     if "mandate" in combined or "autopay" in combined:
         return "MANDATE_FAIL"
-    if "bank" in combined or "gateway" in combined:
-        return "BANK_DOWN"
+    if "qr" in combined or "scan" in combined or "cart" in combined or "abandon" in combined:
+        return "CART_ABANDONMENT"
     return "UNKNOWN"
 
 
-def build_upi_intent_uri(amount_paise: int, payment_id: str = "") -> Optional[str]:
+def compute_erv(
+    amount_paise: int,
+    scenario: str,
+    memory_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    PART 2: Computes Expected Recovery Value (ERV) & recovery probability.
+    Probabilities (illustrative priors):
+    - INSUFFICIENT_BALANCE: 0.75
+    - UPI_LIMIT: 0.70
+    - CART_ABANDONMENT: 0.60
+    - MANDATE_FAIL: 0.50
+    - BANK_DOWN: 0.30
+    - SUPPLIER_FAIL: 0.50
+    - Default: 0.50
+
+    Memory adjustments:
+    - kept_promises > 0 -> +0.10
+    - broken_promises >= 2 -> -0.20
+    - Clamped to [0.05, 0.95]
+    - erv_paise = int(amount_paise * probability)
+    """
+    priors = {
+        "INSUFFICIENT_BALANCE": 0.75,
+        "UPI_LIMIT": 0.70,
+        "CART_ABANDONMENT": 0.60,
+        "MANDATE_FAIL": 0.50,
+        "BANK_DOWN": 0.30,
+        "SUPPLIER_FAIL": 0.50,
+        "CART_DROP": 0.60,
+        "LOW_BALANCE": 0.72,
+    }
+    sc_clean = (scenario or "UNKNOWN").upper()
+    base_prob = priors.get(sc_clean, 0.50)
+    basis = [f"Base scenario prior: {sc_clean} ({base_prob:.2f}) [illustrative prior]"]
+
+    prob = base_prob
+    if memory_context:
+        kept = memory_context.get("kept_promises", 0)
+        broken = memory_context.get("broken_promises", 0)
+        if kept > 0:
+            prob += 0.10
+            basis.append(f"Positive credit history: {kept} past promise(s) kept (+0.10)")
+        if broken >= 2:
+            prob -= 0.20
+            basis.append(f"High risk signal: {broken} broken promise(s) (-0.20)")
+
+    # Clamp probability to 0.05..0.95
+    clamped_prob = max(0.05, min(0.95, prob))
+    if clamped_prob != prob:
+        basis.append(f"Clamped to safety bounds [0.05, 0.95] -> {clamped_prob:.2f}")
+
+    erv_paise = int(amount_paise * clamped_prob)
+    erv_inr = round(erv_paise / 100.0, 2)
+    amount_inr = round(amount_paise / 100.0, 2)
+
+    return {
+        "erv_paise": erv_paise,
+        "erv_inr": erv_inr,
+        "amount_inr": amount_inr,
+        "probability": round(clamped_prob, 2),
+        "recovery_probability": round(clamped_prob, 2),
+        "basis": basis,
+        "label": "illustrative priors",
+    }
+
+
+def generate_supplier_negotiation_draft(
+    merchant_name: str,
+    amount_inr: float,
+    memory_context: Optional[Dict[str, Any]] = None,
+    correlation_id: Optional[str] = None,
+    payment_id: str = "",
+) -> str:
+    """
+    PART 3: B2B Supplier Negotiator.
+    Drafts a professional, persuasive Hinglish order hold notice for distributor/supplier.
+    """
+    cid = correlation_id or str(uuid.uuid4())
+    m_name = merchant_name or os.getenv("MERCHANT_NAME", "Sharma Kirana Store")
+    amount_formatted = f"₹{int(amount_inr):,}" if amount_inr >= 1 else f"₹{amount_inr:.2f}"
+
+    draft = (
+        f"Namaste, main {m_name} ka AI assistant hoon. {amount_formatted} ka payment bank issue se fail hua; "
+        f"shaam 5 baje tak clear ho jayega. Order hold kijiye — hamara payment history saaf hai."
+    )
+
+    client = get_llm_client()
+    if client:
+        try:
+            prompt = (
+                f"Merchant: {m_name}\n"
+                f"Amount: {amount_formatted}\n"
+                f"Distributor Context: B2B recurring supplier order payment failed due to bank gateway.\n"
+                f"Write a 1-paragraph polite Hinglish negotiation letter asking distributor to hold dispatch until 5 PM today. "
+                f"Assure them of clean payment history. Keep it under 40 words."
+            )
+            resp = client.chat.completions.create(
+                model=os.getenv("LLM_MODEL", MODEL_NAME),
+                messages=[
+                    {"role": "system", "content": "You are a professional B2B merchant AI negotiator speaking courteous Hinglish."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=90,
+                temperature=0.3,
+                timeout=5.0,
+            )
+            llm_text = resp.choices[0].message.content.strip()
+            if llm_text and len(llm_text) > 15:
+                draft = llm_text.replace('"', '').strip()
+        except Exception as exc:
+            logger.info("[SUPPLIER_DRAFT] LLM call failed (%s), using deterministic template.", exc)
+
+    # Log NEGOTIATION_DRAFTED
+    db.log_event(
+        correlation_id=cid,
+        payment_id=payment_id or "SYSTEM",
+        event_type="NEGOTIATION_DRAFTED",
+        payload={
+            "merchant_name": m_name,
+            "amount_inr": amount_inr,
+            "draft": draft,
+            "channel": "supplier_channel",
+        },
+        reasoning="B2B Supplier payment hold letter drafted for distributor order retention.",
+        severity="INFO",
+    )
+
+    return draft
+
+
+def build_upi_intent_uri(amount_paise: int, payment_id: str = "") -> str:
     """
     Builds upi_intent_uri as:
-    upi://pay?pa={DEMO_VPA}&pn={merchant_name}&am={amount_paise/100}&cu=INR&tn=Revive
-    DEMO_VPA from env (e.g. 'revive@upi'). If DEMO_VPA unset → omit upi_intent_uri, never crash.
-    Amount MUST equal the recovery amount.
+    upi://pay?pa={DEMO_VPA}&pn={merchant_name}&am={amount_paise/100}&cu=INR&tn=Pratyavartan+Recovery
+    Defaults to sharmageneral@paytm if unconfigured so mobile camera scanning works 100%.
+    Amount MUST equal the recovery amount in INR.
     """
-    vpa = os.getenv("DEMO_VPA", os.getenv("MERCHANT_UPI_VPA", "")).strip()
+    vpa = os.getenv("DEMO_VPA", os.getenv("MERCHANT_UPI_VPA", "sharmageneral@paytm")).strip()
     if not vpa or vpa.lower() in ("dummy", "none", "unset"):
-        return None
-    merchant = os.getenv("MERCHANT_NAME", "Revive").strip() or "Revive"
+        vpa = "sharmageneral@paytm"
+    merchant = os.getenv("MERCHANT_NAME", "Sharma General Store").strip() or "Sharma General Store"
     am_str = f"{amount_paise / 100:.2f}"
-    return f"upi://pay?pa={quote(vpa, safe='@')}&pn={quote(merchant)}&am={am_str}&cu=INR&tn=Revive"
+    tn_suffix = f" {payment_id}" if payment_id else ""
+    return f"upi://pay?pa={quote(vpa, safe='@')}&pn={quote(merchant)}&am={am_str}&cu=INR&tn={quote('Recovery' + tn_suffix)}"
 
 
 def resolve_scenario_and_methods(
@@ -258,7 +410,16 @@ def resolve_scenario_and_methods(
     try:
         scenario = map_scenario(error_code=error_code, reasoning=reasoning)
 
-        if scenario == "UPI_LIMIT":
+        if scenario == "SUPPLIER_FAIL":
+            return (
+                "SUPPLIER_FAIL",
+                [],
+                ["bank_transfer", "neft", "rtgs"],
+                None,
+                "NEGOTIATE_HOLD",
+                reasoning or "Merchant B2B supplier payment failure. Negotiating temporary order hold with distributor.",
+            )
+        elif scenario == "UPI_LIMIT":
             return (
                 "UPI_LIMIT",
                 ["upi", "wallet"],
@@ -331,6 +492,7 @@ def _heuristic_fallback_classifier(
     error_description: str,
     amount_paise: int = 0,
     payment_id: str = "",
+    memory_context: Optional[Dict[str, Any]] = None,
 ) -> AIDiagnosis:
     """
     Deterministic rule-based fallback classifier in the event of LLM API outage or rate limits.
@@ -348,20 +510,33 @@ def _heuristic_fallback_classifier(
         "CART_ABANDONMENT": "CART_DROP",
         "UPI_LIMIT": "LOW_BALANCE",
         "INSUFFICIENT_BALANCE": "LOW_BALANCE",
-        "MANDATE_FAIL": "UNKNOWN",
+        "MANDATE_FAIL": "BANK_DOWN",
+        "SUPPLIER_FAIL": "SUPPLIER_FAIL",
         "UNKNOWN": "UNKNOWN",
     }
     diag_name = diag_map.get(sc, "UNKNOWN")
 
+    erv_data = compute_erv(amount_paise, sc, memory_context)
+    split_offer = None
+    if sc == "INSUFFICIENT_BALANCE" and amount_paise >= 20000:
+        upi_paise = int(amount_paise * 0.4)
+        split_offer = {
+            "upi_paise": upi_paise,
+            "postpaid_paise": amount_paise - upi_paise,
+            "note": "illustrative",
+        }
+
     diag = AIDiagnosis(
         diagnosis=diag_name,
-        action=act if act in ("WAIT_AND_MONITOR", "SEND_UPI_INTENT", "SWITCH_INSTRUMENT", "ESCALATE_HUMAN") else "ESCALATE_HUMAN",
+        action=act if act in ("WAIT_AND_MONITOR", "SEND_UPI_INTENT", "SWITCH_INSTRUMENT", "NEGOTIATE_HOLD", "MANDATE_RETRY", "ESCALATE_HUMAN", "IGNORE_LOW_ERV") else "ESCALATE_HUMAN",
         reasoning=rsn,
         confidence=0.95,
         scenario=sc,
         blocked_methods=blk,
         enabled_methods=enb,
         upi_intent_uri=uri,
+        erv=erv_data,
+        split_offer=split_offer,
     )
     return diag
 
@@ -388,7 +563,7 @@ def generate_discount_offer(
         discount_pct = 5
     elif amount_paise >= 1000000:
         discount_pct = 3
-    elif amount_paise >= 500000:
+    elif amount_paise >= 250000:
         discount_pct = 2
     else:
         discount_pct = 0
@@ -427,6 +602,7 @@ def generate_voice_script(
     payment_id: Optional[str] = None,
     diagnosis: str = "CART_DROP",
     original_error_code: str = "",
+    split_offer: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     PART C: Generates a personalized Hinglish voice negotiation script using the active LLM.
@@ -434,6 +610,7 @@ def generate_voice_script(
         * UPI_LIMIT           -> UPI daily limit reached; 1-click Card/EMI link.
         * INSUFFICIENT_BALANCE / unknown -> balance was low but top-up-able; UPI stays
           ENABLED with a 1-click UPI intent link + Card/EMI backup.
+    - If split_offer is present: Adds Paytm Postpaid split rescue line.
     - For CART_DROP: Highlights retention discount incentive and zero-UI recovery.
     """
     cid = correlation_id or str(uuid.uuid4())
@@ -447,6 +624,8 @@ def generate_voice_script(
     except Exception:
         lb_scenario = "INSUFFICIENT_BALANCE"
 
+    split_line = " Chahein toh kuch UPI se aur baaki Paytm Postpaid se de sakte hain — 1-click split link bheja hai." if split_offer else ""
+
     if diagnosis == "LOW_BALANCE" and lb_scenario == "UPI_LIMIT":
         fallback_script = (
             "Sir, aapki dukaan pe QR payment ki daily UPI limit exceed ho gayi thi, isliye Card aur alternate payment link bheja hai. "
@@ -454,8 +633,12 @@ def generate_voice_script(
         )
     elif diagnosis == "LOW_BALANCE":
         fallback_script = (
-            "Bhaiya, account balance kam hone se dukaan ka QR payment ruk gaya tha. "
-            "Abhi 1-click UPI intent link se pay karein ya Card/EMI use karein!"
+            f"Bhaiya, account balance kam hone se dukaan ka QR payment ruk gaya tha. "
+            f"Abhi 1-click UPI intent link se pay karein ya Card/EMI use karein!{split_line}"
+        )
+    elif diagnosis == "SUPPLIER_FAIL":
+        fallback_script = (
+            f"Namaste! Distributor payment hold notification dispatch ho gaya hai. Order safe hai."
         )
     else:
         fallback_script = (
@@ -485,9 +668,10 @@ def generate_voice_script(
             elif diagnosis == "LOW_BALANCE":
                 insufficient_prompt = (
                     "You are a warm, courteous Indian customer-support executive representing the merchant's AI Teammate (Digital Employee #AI-001) assisting a customer whose Kirana store QR payment failed due to insufficient account balance.\n"
-                    "Generate a concise, natural Hinglish voice message (max 30 words).\n"
-                    "Reassure them it is not a problem: their balance can be topped up (e.g., via a friend/family UPI transfer) and they can pay RIGHT NOW via the 1-click UPI link; Card and EMI are also available as backup.\n"
-                    "Do NOT mention any discounts or price reductions.\n"
+                    "Generate a concise, natural Hinglish voice message (max 32 words).\n"
+                    "Reassure them it is not a problem: their balance can be topped up and they can pay via the 1-click link. "
+                    + ("Mention they can split pay with Paytm Postpaid. " if split_offer else "")
+                    + "Do NOT mention any discounts or price reductions.\n"
                     "Return ONLY the spoken text string without quotes, formatting, or prefixes."
                 )
                 user_msg = (
@@ -495,7 +679,7 @@ def generate_voice_script(
                     f"Original Amount: Rs.{original_inr:,.2f}\n"
                     f"Failure Reason: Insufficient Account Balance (top-up possible)\n"
                     f"Primary Method: 1-Click UPI Intent Link (UPI stays enabled)\n"
-                    f"Backup Methods: Card / EMI / Netbanking"
+                    f"Backup Methods: Card / EMI / Netbanking / Paytm Postpaid"
                 )
                 system_p = insufficient_prompt
             else:
@@ -519,11 +703,13 @@ def generate_voice_script(
             )
             script_text = (response.choices[0].message.content or "").strip().replace('"', '')
             if script_text and len(script_text) > 15:
+                if split_offer and "postpaid" not in script_text.lower():
+                    script_text += f"{split_line}"
                 db.log_event(
                     correlation_id=cid,
                     payment_id=pid,
                     event_type="VOICE_SCRIPT_GENERATED",
-                    payload={"voice_script": script_text, "model": current_model, "diagnosis": diagnosis, "scenario": lb_scenario if diagnosis == "LOW_BALANCE" else "", "final_inr": final_inr},
+                    payload={"voice_script": script_text, "model": current_model, "diagnosis": diagnosis, "scenario": lb_scenario if diagnosis == "LOW_BALANCE" else "", "final_inr": final_inr, "has_split": bool(split_offer)},
                     reasoning=f"Hinglish voice script generated via {current_model} for {diagnosis}.",
                     severity="INFO",
                 )
@@ -535,7 +721,7 @@ def generate_voice_script(
         correlation_id=cid,
         payment_id=pid,
         event_type="VOICE_SCRIPT_GENERATED",
-        payload={"voice_script": fallback_script, "fallback": True, "diagnosis": diagnosis, "scenario": lb_scenario if diagnosis == "LOW_BALANCE" else "", "final_inr": final_inr},
+        payload={"voice_script": fallback_script, "fallback": True, "diagnosis": diagnosis, "scenario": lb_scenario if diagnosis == "LOW_BALANCE" else "", "final_inr": final_inr, "has_split": bool(split_offer)},
         reasoning=f"Deterministic Hinglish voice script applied for {diagnosis}.",
         severity="INFO",
     )
@@ -695,8 +881,17 @@ def classify_and_decide(
                 parsed = json.loads(clean_json_str)
                 llm_reasoning = parsed.get("reasoning") or parsed.get("diagnosis") or f"Diagnosed by {model_name}."
 
+                sc, blk, enb, uri, act, rsn = resolve_scenario_and_methods(
+                    error_code=error_code,
+                    reasoning=llm_reasoning or error_description,
+                    amount_paise=amount_paise,
+                    payment_id=pid if pid != "SYSTEM" else "",
+                )
+
                 diag_raw = str(parsed.get("diagnosis", "UNKNOWN")).upper()
-                if "BANK" in diag_raw or "GATEWAY" in diag_raw or "TIMEOUT" in diag_raw:
+                if sc == "SUPPLIER_FAIL":
+                    safe_diag = "SUPPLIER_FAIL"
+                elif "BANK" in diag_raw or "GATEWAY" in diag_raw or "TIMEOUT" in diag_raw:
                     safe_diag = "BANK_DOWN"
                 elif "CART" in diag_raw or "ABANDON" in diag_raw:
                     safe_diag = "CART_DROP"
@@ -705,22 +900,27 @@ def classify_and_decide(
                 else:
                     safe_diag = "UNKNOWN"
 
-                sc, blk, enb, uri, act, rsn = resolve_scenario_and_methods(
-                    error_code=error_code,
-                    reasoning=llm_reasoning or error_description,
-                    amount_paise=amount_paise,
-                    payment_id=pid if pid != "SYSTEM" else "",
-                )
+                erv_data = compute_erv(amount_paise, sc, memory_context)
+                split_offer = None
+                if sc == "INSUFFICIENT_BALANCE" and amount_paise >= 20000:
+                    upi_paise = int(amount_paise * 0.4)
+                    split_offer = {
+                        "upi_paise": upi_paise,
+                        "postpaid_paise": amount_paise - upi_paise,
+                        "note": "illustrative",
+                    }
 
                 diagnosis_obj = AIDiagnosis(
                     diagnosis=safe_diag,
-                    action=act if act in ("WAIT_AND_MONITOR", "SEND_UPI_INTENT", "SWITCH_INSTRUMENT", "ESCALATE_HUMAN") else "ESCALATE_HUMAN",
+                    action=act if act in ("WAIT_AND_MONITOR", "SEND_UPI_INTENT", "SWITCH_INSTRUMENT", "NEGOTIATE_HOLD", "MANDATE_RETRY", "ESCALATE_HUMAN", "IGNORE_LOW_ERV") else "ESCALATE_HUMAN",
                     reasoning=rsn,
                     confidence=float(parsed.get("confidence", 0.95)),
                     scenario=sc,
                     blocked_methods=blk,
                     enabled_methods=enb,
                     upi_intent_uri=uri,
+                    erv=erv_data,
+                    split_offer=split_offer,
                 )
                 return diagnosis_obj
 
@@ -767,6 +967,7 @@ def classify_and_decide(
             error_description=error_description,
             amount_paise=amount_paise,
             payment_id=pid if pid != "SYSTEM" else "",
+            memory_context=memory_context,
         )
         return fallback_diag
 
@@ -776,6 +977,7 @@ def classify_and_decide(
         error_description=error_description,
         amount_paise=amount_paise,
         payment_id=pid if pid != "SYSTEM" else "",
+        memory_context=memory_context,
     )
 
 
@@ -825,6 +1027,12 @@ def process_failed_payment(
     }
     if diagnosis.upi_intent_uri:
         diag_payload["upi_intent_uri"] = diagnosis.upi_intent_uri
+    if diagnosis.erv:
+        diag_payload["erv"] = diagnosis.erv
+    if diagnosis.split_offer:
+        diag_payload["split_offer"] = diagnosis.split_offer
+    if diagnosis.negotiation_draft:
+        diag_payload["negotiation_draft"] = diagnosis.negotiation_draft
 
     db.log_event(
         correlation_id=cid,

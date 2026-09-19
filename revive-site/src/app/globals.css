@@ -1,97 +1,75 @@
 @import "tailwindcss";
 
 @theme {
-  /* Pratyavartan original palette — no generic AI blue/purple */
-  --color-canvas: #1a1a1a;
-  --color-copper: #cd7f32;
-  --color-teal: #20b2aa;
-  --color-amber: #ff9500;
-  --color-body: #e0e0e0;
+  /* ═══ PRATYAVARTAN DESIGN SYSTEM ═══ */
+  /* Semantic color tokens mapped to backend event severities */
+  --color-base: #05070D;
+  --color-surface: rgba(255, 255, 255, 0.04);
+  --color-stroke: rgba(255, 255, 255, 0.08);
+  --color-accent: #00BAF2;       /* Paytm blue — primary brand, CTAs */
+  --color-recovered: #22C55E;    /* Green — RECOVERED, PROMISE_KEPT */
+  --color-monitor: #FBBF24;      /* Amber — MONITORING, warnings */
+  --color-ai: #8B5CF6;           /* Purple — AI diagnosis, LLM */
+  --color-critical: #FF4D6D;     /* Red — ESCALATE_HUMAN, failures */
+  --color-text: #E8ECF4;         /* Primary text */
+  --color-muted: #8A93A6;        /* Secondary text */
+
+  /* Font stacks */
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Space Grotesk Variable", "Space Grotesk", var(--font-sans);
-  --font-mono2: "JetBrains Mono", ui-monospace, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
+/* ═══ BASE ═══ */
 html {
   scrollbar-width: thin;
-  scrollbar-color: #3a3a3a #1a1a1a;
+  scrollbar-color: #1a1f2e #05070D;
 }
 
 body {
   font-family: var(--font-sans);
   overflow-x: hidden;
+  background-color: #05070D;
+  color: #E8ECF4;
 }
 
 ::selection {
-  background: rgba(205, 127, 50, 0.4);
+  background: rgba(0, 186, 242, 0.3);
   color: #fff;
 }
 
+/* ═══ UTILITY CLASSES ═══ */
 .font-display { font-family: var(--font-display); }
-.mono { font-family: var(--font-mono2); letter-spacing: 0.02em; }
+.mono { font-family: var(--font-mono); letter-spacing: 0.02em; }
 
-/* Instrument-Serif-style italic emphasis slot, now Space Grotesk italic feel via serif fallback kept minimal */
-.serif-it {
-  font-family: var(--font-display);
-  font-style: italic;
-  letter-spacing: -0.01em;
-}
-
-/* Copper → teal gradient text for key words / wordmark */
+/* Gradient text — accent to purple */
 .grad-text {
-  background: linear-gradient(100deg, #cd7f32 10%, #e8a45c 45%, #20b2aa 90%);
+  background: linear-gradient(135deg, #00BAF2 0%, #8B5CF6 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
-.grad-text-teal {
-  background: linear-gradient(100deg, #20b2aa, #7fd6d0);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-.copper-underline {
-  background-image: linear-gradient(90deg, #cd7f32, #cd7f32);
-  background-size: 100% 3px;
-  background-position: 0 100%;
-  background-repeat: no-repeat;
-  padding-bottom: 6px;
-}
 
-/* Fine card + warm hover glow */
-.fine-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
-  transition:
-    border-color 0.35s ease,
-    box-shadow 0.35s ease,
-    transform 0.35s ease;
-}
-.fine-card:hover {
-  border-color: rgba(205, 127, 50, 0.45);
-  box-shadow:
-    inset 0 0 40px rgba(205, 127, 50, 0.06),
-    0 0 60px rgba(32, 178, 170, 0.08);
-}
-
-/* Glassmorphic overlay — charcoal + tinted, restrained */
+/* ═══ GLASSMORPHISM ═══ */
 .glass {
-  background: rgba(26, 26, 26, 0.55);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  border: 1px solid rgba(32, 178, 170, 0.22);
+  background: rgba(5, 7, 13, 0.6);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+/* ═══ GRAIN OVERLAY ═══ */
 .grain::after {
   content: "";
   position: fixed;
   inset: -50%;
   z-index: 60;
   pointer-events: none;
-  opacity: 0.05;
+  opacity: 0.035;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   animation: grain-shift 9s steps(6) infinite;
 }
+
 @keyframes grain-shift {
   0%, 100% { transform: translate(0, 0); }
   20% { transform: translate(-4%, 3%); }
@@ -100,122 +78,116 @@ body {
   80% { transform: translate(4%, 4%); }
 }
 
-.outline-wordmark {
-  color: transparent;
-  -webkit-text-stroke: 1px rgba(205, 127, 50, 0.25);
+/* ═══ GRID LINES (war room aesthetic) ═══ */
+.grid-lines {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 120px 100%;
 }
 
-/* Amber celebration pulse (recovery only) */
-.amber-pulse {
-  animation: amber-pulse 2.4s ease-in-out infinite;
-}
-@keyframes amber-pulse {
-  0%, 100% { box-shadow: 0 0 60px rgba(255, 149, 0, 0.12); }
-  50% { box-shadow: 0 0 110px rgba(255, 149, 0, 0.28); }
-}
-
-/* Copper → teal core pulse (agent) */
-.core-pulse {
-  animation: core-pulse 3.2s ease-in-out infinite;
-}
-@keyframes core-pulse {
-  0%, 100% {
-    box-shadow:
-      0 0 100px rgba(205, 127, 50, 0.22),
-      inset 0 0 30px rgba(205, 127, 50, 0.12);
-    border-color: rgba(205, 127, 50, 0.6);
-  }
-  50% {
-    box-shadow:
-      0 0 130px rgba(32, 178, 170, 0.22),
-      inset 0 0 30px rgba(32, 178, 170, 0.14);
-    border-color: rgba(32, 178, 170, 0.7);
-  }
-}
-
-/* ============ CINEMA LAYER ============ */
-
-/* 6. Grain (tuned to spec opacity, intensifies during letterbox scenes) */
-.grain::after { opacity: 0.03; }
-body.cinema-on .grain::after { opacity: 0.09; }
-
-/* Global soft vignette */
-.vignette-cinema {
+/* ═══ VIGNETTE ═══ */
+.vignette {
   position: fixed;
   inset: 0;
   z-index: 55;
   pointer-events: none;
-  background: radial-gradient(ellipse at center, transparent 58%, rgba(0, 0, 0, 0.42) 100%);
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(5, 7, 13, 0.5) 100%);
 }
 
-/* 2. Letterbox bars — GPU transforms only */
-.bar-top,
-.bar-bottom {
-  position: fixed;
-  left: 0;
-  right: 0;
-  height: 8vh;
-  background: #000;
-  z-index: 70;
-  pointer-events: none;
-}
-.bar-top { top: 0; transform: translateY(-101%); will-change: transform; }
-.bar-bottom { bottom: 0; transform: translateY(101%); will-change: transform; }
-@media (max-width: 768px) {
-  .bar-top, .bar-bottom { height: 5vh; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .bar-top, .bar-bottom { display: none; }
-}
-
-/* 3. Custom cursor — dot rides native position; ring trails via JS lerp.
-      Expansion on hoverables is pure CSS via :has. Hidden on touch. */
+/* ═══ CUSTOM CURSOR ═══ */
 @media (pointer: fine) {
-  html.cinema-cursor, html.cinema-cursor a, html.cinema-cursor button { cursor: none; }
+  html.custom-cursor,
+  html.custom-cursor a,
+  html.custom-cursor button { cursor: none; }
 }
+
 .cursor-dot {
   position: fixed;
   top: 0; left: 0;
   width: 7px; height: 7px;
   border-radius: 50%;
-  background: var(--color-copper);
-  box-shadow: 0 0 10px rgba(205, 127, 50, 0.8);
+  background: #00BAF2;
+  box-shadow: 0 0 10px rgba(0, 186, 242, 0.6);
   pointer-events: none;
-  z-index: 90;
+  z-index: 9999;
+  mix-blend-mode: difference;
 }
+
 .cursor-ring {
   position: fixed;
-  top: var(--my, -100px);
-  left: var(--mx, -100px);
   width: 34px; height: 34px;
   border-radius: 50%;
-  border: 1.5px solid rgba(32, 178, 170, 0.75);
-  box-shadow: 0 0 14px rgba(32, 178, 170, 0.25), inset 0 0 8px rgba(32, 178, 170, 0.15);
+  border: 1.5px solid rgba(0, 186, 242, 0.5);
+  box-shadow: 0 0 14px rgba(0, 186, 242, 0.15);
   pointer-events: none;
-  z-index: 89;
-  transition: width 0.22s ease, height 0.22s ease, border-color 0.22s ease, top 0.05s linear, left 0.05s linear;
+  z-index: 9998;
+  mix-blend-mode: difference;
+  transition: width 0.2s ease, height 0.2s ease, border-color 0.2s ease;
 }
+
 html:has(a:hover) .cursor-ring,
 html:has(button:hover) .cursor-ring,
 html:has([role="button"]:hover) .cursor-ring {
   width: 54px;
   height: 54px;
-  border-color: rgba(205, 127, 50, 0.9);
+  border-color: rgba(139, 92, 246, 0.8);
 }
+
 @media (pointer: coarse) {
-  .cursor-dot, .cursor-ring { display: none; }
+  .cursor-dot, .cursor-ring { display: none !important; }
 }
 
-/* Variable weight axis helper */
-.ww { font-variation-settings: "wght" 400; }
-
-@media (prefers-reduced-motion: reduce) {
-  .vignette-cinema { display: none; }
+/* ═══ SCROLL PROGRESS BAR ═══ */
+.scroll-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 100;
+  transform-origin: left;
+  background: linear-gradient(90deg, #00BAF2, #8B5CF6);
 }
 
+/* ═══ MARQUEE ANIMATION ═══ */
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-33.333%); }
+}
+
+/* ═══ SEVERITY BADGES ═══ */
+.badge-info {
+  color: #00BAF2;
+  border-color: rgba(0, 186, 242, 0.3);
+  background: rgba(0, 186, 242, 0.08);
+}
+.badge-success {
+  color: #22C55E;
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.08);
+}
+.badge-warning {
+  color: #FBBF24;
+  border-color: rgba(251, 191, 36, 0.3);
+  background: rgba(251, 191, 36, 0.08);
+}
+.badge-critical {
+  color: #FF4D6D;
+  border-color: rgba(255, 77, 109, 0.3);
+  background: rgba(255, 77, 109, 0.08);
+}
+.badge-ai {
+  color: #8B5CF6;
+  border-color: rgba(139, 92, 246, 0.3);
+  background: rgba(139, 92, 246, 0.08);
+}
+
+/* ═══ REDUCED MOTION ═══ */
 @media (prefers-reduced-motion: reduce) {
-  .grain::after { animation: none; }
-  .amber-pulse { animation: none; box-shadow: 0 0 70px rgba(255, 149, 0, 0.15); }
+  .grain::after { animation: none; opacity: 0.02; }
+  .vignette { display: none; }
+  .cursor-dot, .cursor-ring { display: none !important; }
+
   *,
   *::before,
   *::after {

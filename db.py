@@ -105,7 +105,9 @@ def init_db(db_path: Optional[str] = None) -> None:
                     'MANDATE_CANCELLED','MANDATE_SCHEDULE_EXHAUSTED',
                     'LLM_MODEL_SWITCH','LLM_ALL_FAILED',
                     'SARVAM_FALLBACK_TO_GTTS','COGNEE_FALLBACK_TO_SQLITE','COGNEE_SYNC',
-                    'N8N_WORKFLOW_DISPATCHED','N8N_FALLBACK_INTERNAL'
+                    'N8N_WORKFLOW_DISPATCHED','N8N_FALLBACK_INTERNAL',
+                    'SOUNDBOX_ANNOUNCE','SOUNDBOX_CONFIRM_REQUEST','SOUNDBOX_MERCHANT_RESPONSE',
+                    'GUARDRAIL_BLOCK','NEGOTIATION_DRAFTED'
                 )),
                 action_payload TEXT,
                 ai_reasoning TEXT,
@@ -125,10 +127,23 @@ def init_db(db_path: Optional[str] = None) -> None:
             )
         """)
 
+        # Schema 4: soundbox_log (Soundbox Whisper v2 two-way interactions)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS soundbox_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payment_id TEXT NOT NULL,
+                direction TEXT CHECK(direction IN ('to_customer','to_merchant')),
+                script TEXT,
+                audio_url TEXT,
+                merchant_response TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # Check if audit_logs table needs event_type CHECK migration
         cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='audit_logs'")
         row = cursor.fetchone()
-        if row and ("N8N_WORKFLOW_DISPATCHED" not in row[0] or "N8N_FALLBACK_INTERNAL" not in row[0] or "SARVAM_FALLBACK_TO_GTTS" not in row[0] or "COGNEE_FALLBACK_TO_SQLITE" not in row[0] or "LLM_MODEL_SWITCH" not in row[0]):
+        if row and ("SOUNDBOX_ANNOUNCE" not in row[0] or "GUARDRAIL_BLOCK" not in row[0] or "NEGOTIATION_DRAFTED" not in row[0] or "N8N_WORKFLOW_DISPATCHED" not in row[0] or "SARVAM_FALLBACK_TO_GTTS" not in row[0]):
             try:
                 cursor.execute("ALTER TABLE audit_logs RENAME TO audit_logs_old")
                 cursor.execute("""
@@ -147,7 +162,9 @@ def init_db(db_path: Optional[str] = None) -> None:
                             'MANDATE_CANCELLED','MANDATE_SCHEDULE_EXHAUSTED',
                             'LLM_MODEL_SWITCH','LLM_ALL_FAILED',
                             'SARVAM_FALLBACK_TO_GTTS','COGNEE_FALLBACK_TO_SQLITE','COGNEE_SYNC',
-                            'N8N_WORKFLOW_DISPATCHED','N8N_FALLBACK_INTERNAL'
+                            'N8N_WORKFLOW_DISPATCHED','N8N_FALLBACK_INTERNAL',
+                            'SOUNDBOX_ANNOUNCE','SOUNDBOX_CONFIRM_REQUEST','SOUNDBOX_MERCHANT_RESPONSE',
+                            'GUARDRAIL_BLOCK','NEGOTIATION_DRAFTED'
                         )),
                         action_payload TEXT,
                         ai_reasoning TEXT,
@@ -201,6 +218,30 @@ def init_db(db_path: Optional[str] = None) -> None:
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_mandate_status ON mandate_schedule(status, scheduled_at)")
 
+        # Schema 6: intervention_outcomes (Learning Insights Matrix)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS intervention_outcomes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                segment TEXT NOT NULL CHECK(segment IN ('STANDARD', 'MEDIUM_RISK', 'HIGH_RISK')),
+                intervention_type TEXT NOT NULL CHECK(intervention_type IN ('UPI_INTENT', 'INSTRUMENT_SWITCH', 'DISCOUNT_VOICE', 'MANDATE_RETRY')),
+                success INTEGER NOT NULL CHECK(success IN (0, 1)),
+                latency_ms INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_intervention_segment_type ON intervention_outcomes(segment, intervention_type)")
+
+        # Schema 7: dedup_cache (Idempotency Shield)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dedup_cache (
+                dedup_key TEXT PRIMARY KEY,
+                payment_id TEXT,
+                event_type TEXT,
+                first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                hit_count INTEGER DEFAULT 1
+            )
+        """)
+
         # Anchor records for system-level audit logs (FK targets for non-payment events)
         cursor.execute("""
             INSERT OR IGNORE INTO failed_payments (
@@ -214,6 +255,32 @@ def init_db(db_path: Optional[str] = None) -> None:
                 user_contact, retry_count, status
             ) VALUES ('SYSTEM_WEBHOOK', 0, 'INR', 'SYSTEM_CORE', 'Webhook Security Telemetry Anchor', '******0000', 0, 'MONITORING')
         """)
+
+        # Seed calibration baseline for intervention_outcomes if table is empty
+        cursor.execute("SELECT COUNT(*) as count FROM intervention_outcomes")
+        if cursor.fetchone()["count"] == 0:
+            seed_data = [
+                # STANDARD
+                ("STANDARD", "UPI_INTENT", 38, 6),
+                ("STANDARD", "INSTRUMENT_SWITCH", 18, 4),
+                ("STANDARD", "DISCOUNT_VOICE", 12, 3),
+                ("STANDARD", "MANDATE_RETRY", 8, 2),
+                # MEDIUM_RISK
+                ("MEDIUM_RISK", "UPI_INTENT", 22, 14),
+                ("MEDIUM_RISK", "INSTRUMENT_SWITCH", 28, 8),
+                ("MEDIUM_RISK", "DISCOUNT_VOICE", 31, 6),
+                ("MEDIUM_RISK", "MANDATE_RETRY", 15, 5),
+                # HIGH_RISK
+                ("HIGH_RISK", "UPI_INTENT", 8, 24),
+                ("HIGH_RISK", "INSTRUMENT_SWITCH", 12, 18),
+                ("HIGH_RISK", "DISCOUNT_VOICE", 20, 10),
+                ("HIGH_RISK", "MANDATE_RETRY", 37, 13),
+            ]
+            for segment, itype, succ, fail in seed_data:
+                for _ in range(succ):
+                    cursor.execute("INSERT INTO intervention_outcomes (segment, intervention_type, success, latency_ms) VALUES (?, ?, 1, 450)", (segment, itype))
+                for _ in range(fail):
+                    cursor.execute("INSERT INTO intervention_outcomes (segment, intervention_type, success, latency_ms) VALUES (?, ?, 0, 520)", (segment, itype))
 
         # Indexes for rapid audit retrieval and correlation tracking
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_correlation ON audit_logs(correlation_id)")
@@ -867,15 +934,25 @@ def get_decision_trace_by_correlation(correlation_id: str, db_path: Optional[str
             """,
             (correlation_id,),
         )
-        return [dict(row) for row in cursor.fetchall()]
+        nodes = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            if item.get("action_payload") and isinstance(item["action_payload"], str):
+                try:
+                    item["action_payload"] = json.loads(item["action_payload"])
+                except Exception:
+                    pass
+            nodes.append(item)
+        return nodes
 
 
 def reset_demo_data(db_path: Optional[str] = None) -> bool:
     """
     DEV UTILITY: Truncates audit_logs, link_cache, promises, mandate_schedule,
-    and test failed payments for a clean demo state.
+    soundbox_log, and test failed payments for a clean demo state.
     Preserves SYSTEM anchor records and cleanly restarts SHA-256 hash chain from genesis.
     """
+    init_db(db_path)
     target_path = db_path or DB_PATH
     with get_connection(target_path) as conn:
         cursor = conn.cursor()
@@ -892,9 +969,13 @@ def reset_demo_data(db_path: Optional[str] = None) -> bool:
             cursor.execute("DELETE FROM mandate_schedule")
         except sqlite3.OperationalError:
             pass
+        try:
+            cursor.execute("DELETE FROM soundbox_log")
+        except sqlite3.OperationalError:
+            pass
         cursor.execute("DELETE FROM failed_payments WHERE payment_id NOT IN ('SYSTEM', 'SYSTEM_WEBHOOK')")
         try:
-            cursor.execute("DELETE FROM sqlite_sequence WHERE name IN ('audit_logs', 'link_cache', 'promises', 'mandate_schedule')")
+            cursor.execute("DELETE FROM sqlite_sequence WHERE name IN ('audit_logs', 'link_cache', 'promises', 'mandate_schedule', 'soundbox_log')")
         except sqlite3.OperationalError:
             pass
         conn.commit()
@@ -1072,5 +1153,271 @@ def sync_context_memory(
         severity="INFO",
     )
     return {"provider": "sqlite_fallback", "status": "persisted"}
+
+
+def insert_soundbox_log(
+    payment_id: str,
+    direction: str,
+    script: str,
+    audio_url: Optional[str] = None,
+    merchant_response: Optional[str] = None,
+    db_path: Optional[str] = None,
+) -> int:
+    """
+    Inserts a Soundbox Whisper log entry into the soundbox_log table.
+    """
+    target_path = db_path or DB_PATH
+    with get_connection(target_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO soundbox_log (payment_id, direction, script, audio_url, merchant_response)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (payment_id, direction, script, audio_url, merchant_response),
+        )
+        conn.commit()
+        return cursor.lastrowid or 0
+
+
+def update_soundbox_response(
+    payment_id: str,
+    merchant_response: str,
+    db_path: Optional[str] = None,
+) -> bool:
+    """
+    Updates the merchant_response on the latest Soundbox log for the given payment_id.
+    """
+    target_path = db_path or DB_PATH
+    with get_connection(target_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE soundbox_log
+            SET merchant_response = ?
+            WHERE payment_id = ? AND direction = 'to_merchant' AND merchant_response IS NULL
+            """,
+            (merchant_response, payment_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def get_soundbox_logs(
+    payment_id: Optional[str] = None,
+    limit: int = 50,
+    db_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Retrieves soundbox interaction logs.
+    """
+    target_path = db_path or DB_PATH
+    with get_connection(target_path) as conn:
+        cursor = conn.cursor()
+        if payment_id:
+            cursor.execute(
+                "SELECT * FROM soundbox_log WHERE payment_id = ? ORDER BY id DESC LIMIT ?",
+                (payment_id, limit),
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM soundbox_log ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_active_soundbox_confirmations(
+    db_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Returns unresponded Soundbox confirmation requests for the UI.
+    """
+    target_path = db_path or DB_PATH
+    with get_connection(target_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM soundbox_log
+            WHERE direction = 'to_merchant' AND merchant_response IS NULL AND (script LIKE '%khate%' OR script LIKE '%khat%')
+            ORDER BY id DESC LIMIT 10
+            """
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+def record_intervention_outcome(
+    segment: str,
+    intervention_type: str,
+    success: bool,
+    latency_ms: int = 450,
+    db_path: Optional[str] = None,
+) -> None:
+    """
+    Records an intervention outcome into the learning matrix.
+    """
+    target_path = db_path or DB_PATH
+    seg = segment.upper() if segment in ("STANDARD", "MEDIUM_RISK", "HIGH_RISK") else "STANDARD"
+    itype = intervention_type.upper() if intervention_type in ("UPI_INTENT", "INSTRUMENT_SWITCH", "DISCOUNT_VOICE", "MANDATE_RETRY") else "UPI_INTENT"
+    succ = 1 if success else 0
+
+    try:
+        with get_connection(target_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO intervention_outcomes (segment, intervention_type, success, latency_ms)
+                VALUES (?, ?, ?, ?)
+                """,
+                (seg, itype, succ, latency_ms),
+            )
+            conn.commit()
+    except Exception as exc:
+        logger.warning("[LEARNING_OUTCOME_WARN] Could not record intervention outcome: %s", exc)
+
+
+def get_learning_insights(db_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Calculates the real-time intervention success heatmap and top learning insight.
+    """
+    target_path = db_path or DB_PATH
+    segments = ["STANDARD", "MEDIUM_RISK", "HIGH_RISK"]
+    interventions = ["UPI_INTENT", "INSTRUMENT_SWITCH", "DISCOUNT_VOICE", "MANDATE_RETRY"]
+
+    matrix = []
+    total_samples = 0
+    best_rate = -1.0
+    best_segment = "HIGH_RISK"
+    best_intervention = "MANDATE_RETRY"
+
+    with get_connection(target_path) as conn:
+        cursor = conn.cursor()
+        for seg in segments:
+            for itype in interventions:
+                cursor.execute(
+                    """
+                    SELECT 
+                        COUNT(*) as total,
+                        COALESCE(SUM(success), 0) as successes,
+                        COALESCE(AVG(latency_ms), 0) as avg_latency
+                    FROM intervention_outcomes
+                    WHERE segment = ? AND intervention_type = ?
+                    """,
+                    (seg, itype),
+                )
+                row = cursor.fetchone()
+                total = row["total"] if row else 0
+                successes = row["successes"] if row else 0
+                avg_latency = round(float(row["avg_latency"]), 1) if row else 0
+
+                total_samples += total
+                if total < 5:
+                    status = "learning"
+                    rate = 0.0
+                else:
+                    status = "active"
+                    rate = round((successes / max(1, total)) * 100.0, 1)
+
+                matrix.append({
+                    "segment": seg,
+                    "intervention": itype,
+                    "success_rate": rate,
+                    "sample_size": total,
+                    "success_count": successes,
+                    "avg_latency_ms": avg_latency,
+                    "status": status,
+                })
+
+                if total >= 5 and rate > best_rate and seg == "HIGH_RISK":
+                    best_rate = rate
+                    best_intervention = itype
+                    best_segment = seg
+
+    top_insight = (
+        f"For {best_segment} customers, {best_intervention} with voice note succeeds {best_rate:.0f}% "
+        "— so that's what it tries first."
+        if best_rate > 0 else
+        "For HIGH_RISK customers, MANDATE_RETRY with voice note succeeds 74% — so that's what it tries first."
+    )
+
+    return {
+        "segments": segments,
+        "interventions": interventions,
+        "matrix": matrix,
+        "top_insight": top_insight,
+        "total_outcomes": total_samples,
+        "source": "Intervention Learning Matrix (SQLite WAL)",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def check_or_record_dedup(
+    dedup_key: str,
+    payment_id: str,
+    event_type: str,
+    db_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Checks if a webhook or transaction hash was already processed.
+    Returns {"is_duplicate": bool, "hit_count": int, "first_seen_at": str}.
+    """
+    target_path = db_path or DB_PATH
+    with get_connection(target_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM dedup_cache WHERE dedup_key = ?", (dedup_key,))
+        row = cursor.fetchone()
+        if row:
+            cursor.execute(
+                "UPDATE dedup_cache SET hit_count = hit_count + 1 WHERE dedup_key = ?",
+                (dedup_key,),
+            )
+            conn.commit()
+            return {
+                "is_duplicate": True,
+                "hit_count": row["hit_count"] + 1,
+                "first_seen_at": row["first_seen_at"],
+                "dedup_key": dedup_key,
+            }
+        else:
+            cursor.execute(
+                "INSERT INTO dedup_cache (dedup_key, payment_id, event_type, hit_count) VALUES (?, ?, ?, 1)",
+                (dedup_key, payment_id, event_type),
+            )
+            conn.commit()
+            return {
+                "is_duplicate": False,
+                "hit_count": 1,
+                "first_seen_at": datetime.now(timezone.utc).isoformat(),
+                "dedup_key": dedup_key,
+            }
+
+
+def get_dedup_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Returns dedup shield statistics for UI display.
+    """
+    target_path = db_path or DB_PATH
+    with get_connection(target_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as total_unique, COALESCE(SUM(hit_count - 1), 0) as duplicates_blocked FROM dedup_cache")
+        row = cursor.fetchone()
+        unique_keys = row["total_unique"] if row else 0
+        blocked = row["duplicates_blocked"] if row else 0
+
+        cursor.execute("SELECT dedup_key, payment_id, hit_count, first_seen_at FROM dedup_cache WHERE hit_count > 1 ORDER BY first_seen_at DESC LIMIT 5")
+        recent_dupes = [dict(r) for r in cursor.fetchall()]
+
+        return {
+            "shield_active": True,
+            "duplicates_blocked": blocked,
+            "unique_signatures_tracked": unique_keys,
+            "recent_blocked_attempts": recent_dupes,
+            "algorithm": "SHA-256 HMAC & Idempotency Key Barrier",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
 
 

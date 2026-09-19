@@ -28,6 +28,9 @@ venv.bak/
 
 # Logs & Dev output
 *.log
+*.bak
+.n8n/
+gstack/
 dev_out.txt
 dev_err.txt
 uvicorn_*.txt

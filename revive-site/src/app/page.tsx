@@ -1,57 +1,53 @@
-import Navbar from "@/components/navbar";
-import Hero from "@/components/hero";
-import TransactionScene from "@/components/transaction-scene";
-import ContextSection from "@/components/context-section";
-import BlindRetry from "@/components/blind-retry";
-import AgentSection from "@/components/agent-section";
-import DecisionEngine from "@/components/decision-engine";
-import RecoveryStrategy from "@/components/recovery-strategy";
-import Guardrails from "@/components/guardrails";
-import RecoveryScene from "@/components/recovery-scene";
-import ImpactSection from "@/components/impact-section";
-import BuildStory from "@/components/build-story";
-import DeveloperSection from "@/components/developer-section";
-import IntelligenceSection from "@/components/intelligence-section";
-import Faq from "@/components/faq";
-import FinalCta from "@/components/final-cta";
-import Footer from "@/components/footer";
-import SmoothScroll from "@/components/smooth-scroll";
-import CinemaBars from "@/components/cinema/cinema-bars";
-import CinemaCursor from "@/components/cinema/cinema-cursor";
-import GradientMeshLazy from "@/components/cinema/gradient-mesh-lazy";
+import { Navbar } from "@/components/navbar";
+import { SmoothScroll } from "@/components/smooth-scroll";
+import { ScrollProgress } from "@/components/scroll-progress";
+import { CustomCursor } from "@/components/custom-cursor";
+import { Preloader } from "@/components/preloader";
+import { GrainOverlay } from "@/components/grain-overlay";
+import { MeshGradient } from "@/components/mesh-gradient";
 
+import Hero from "@/components/sections/hero";
+import ProblemMarquee from "@/components/sections/problem-marquee";
+import { FivePillars } from "@/components/sections/five-pillars";
+import { SimulationTerminal } from "@/components/sections/simulation-terminal";
+import { AIBrain } from "@/components/sections/ai-brain";
+import { VoiceEngine } from "@/components/sections/voice-engine";
+import { Orchestration } from "@/components/sections/orchestration";
+import { MemoryLayer } from "@/components/sections/memory-layer";
+import { ResilienceMatrix } from "@/components/sections/resilience-matrix";
+import { CryptoLedger } from "@/components/sections/crypto-ledger";
+import { Compliance } from "@/components/sections/compliance";
+import { Metrics } from "@/components/sections/metrics";
+import { FinalCTA } from "@/components/sections/final-cta";
+import { Footer } from "@/components/sections/footer";
 
 export default function Home() {
   return (
     <SmoothScroll>
-      <div className="grain relative">
-        <GradientMeshLazy />
-        <div className="vignette-cinema" aria-hidden />
-        <CinemaBars />
-        <CinemaCursor />
-        <div className="relative z-10">
-          <Navbar />
-          <main>
-            {/* COLOR ARC: cool failure → copper understanding → amber recovery */}
-            {/* FAILED → WHY → CONTEXT → DIAGNOSE → CHOOSE → GUARDRAILS → EXECUTE → RECOVER → LEARN */}
-            <Hero />
-            <TransactionScene />
-            <ContextSection />
-            <BlindRetry />
-            <AgentSection />
-            <DecisionEngine />
-            <RecoveryStrategy />
-            <Guardrails />
-            <RecoveryScene />
-            <ImpactSection />
-            <BuildStory />
-            <DeveloperSection />
-            <IntelligenceSection />
-            <Faq />
-            <FinalCta />
-          </main>
-          <Footer />
-        </div>
+      <Preloader />
+      <ScrollProgress />
+      <CustomCursor />
+      <GrainOverlay />
+      <MeshGradient />
+
+      <div className="relative z-10">
+        <Navbar />
+        <main>
+          <Hero />
+          <ProblemMarquee />
+          <FivePillars />
+          <SimulationTerminal />
+          <AIBrain />
+          <VoiceEngine />
+          <Orchestration />
+          <MemoryLayer />
+          <ResilienceMatrix />
+          <CryptoLedger />
+          <Compliance />
+          <Metrics />
+          <FinalCTA />
+        </main>
+        <Footer />
       </div>
     </SmoothScroll>
   );
