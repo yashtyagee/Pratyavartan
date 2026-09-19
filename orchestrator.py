@@ -417,19 +417,21 @@ def process_single_payment_workflow(
             "message": "Payment escalated for manual compliance review.",
         }
 
-    # Record final routing decision in audit trail
-    db.log_event(
-        correlation_id=cid,
-        payment_id=payment_id,
-        event_type="API_EXECUTED",
-        payload={
-            "orchestrator_decision": action,
-            "diagnosis": diagnosis.diagnosis,
-            "action_result": action_result,
-        },
-        reasoning=f"Orchestration completed for action '{action}'.",
-        severity="INFO",
-    )
+    # Record final routing decision in audit trail only if not already logged by service action handlers
+    # Note: ESCALATE_HUMAN has ZERO API outreach execution (pure compliance escalation)
+    if action not in ("ESCALATE_HUMAN", "WAIT_AND_MONITOR", "DISCOUNT_OFFER", "SWITCH_INSTRUMENT"):
+        db.log_event(
+            correlation_id=cid,
+            payment_id=payment_id,
+            event_type="API_EXECUTED",
+            payload={
+                "orchestrator_decision": action,
+                "diagnosis": diagnosis.diagnosis,
+                "action_result": action_result,
+            },
+            reasoning=f"Orchestration completed for action '{action}'.",
+            severity="INFO",
+        )
 
     return {
         "success": True,

@@ -33,7 +33,7 @@ async function testHappyPath() {
       error_code: "qr_fail",
       error_description: "QR scan timed out at merchant checkout",
       amount: 300000, // Rs. 3,000 in paise
-      user_contact: "9876543210",
+      user_contact: "9876500001",
     }),
   });
 
@@ -232,7 +232,7 @@ async function testNegativePathBankDown() {
       error_code: "gateway_timeout",
       error_description: "NPCI core banking switch timeout",
       amount: 150000,
-      user_contact: "9876543210",
+      user_contact: "9876540003",
     }),
   });
 

@@ -11,6 +11,7 @@ import {
   RotateCw,
   ArrowLeft,
   AlertTriangle,
+  Award,
 } from "lucide-react";
 import {
   HealthResponse,
@@ -18,6 +19,7 @@ import {
   LinkQuotaResponse,
   DedupStatsResponse,
 } from "@/lib/console-api";
+import { EmployeeReportCard } from "./employee-report-card";
 
 interface ConsoleHeaderProps {
   health?: HealthResponse;
@@ -39,6 +41,7 @@ export default function ConsoleHeader({
   onRefresh,
 }: ConsoleHeaderProps) {
   const [secondsAgo, setSecondsAgo] = useState(0);
+  const [showReportCard, setShowReportCard] = useState(false);
 
   useEffect(() => {
     setSecondsAgo(0);
@@ -187,6 +190,19 @@ export default function ConsoleHeader({
             </span>
           </div>
 
+          {/* AI Teammate Employee Report Card Button */}
+          <button
+            onClick={() => setShowReportCard(true)}
+            className="flex items-center gap-1.5 rounded-full border border-amber-400/40 bg-gradient-to-r from-amber-500/20 to-amber-600/10 px-3 py-1 font-mono text-[11px] font-bold text-amber-300 transition-all hover:scale-105 hover:border-amber-400 hover:shadow-[0_0_15px_rgba(251,191,36,0.3)] active:scale-95 cursor-pointer"
+            title="Open AI Teammate Official Performance Review & ROI Scorecard"
+          >
+            <Award className="h-3.5 w-3.5 text-amber-300" />
+            <span>AI REPORT CARD</span>
+            <span className="rounded bg-amber-400/30 px-1 py-0.2 text-[9px] font-extrabold text-white">
+              A+
+            </span>
+          </button>
+
           {/* Relative Timestamp & Refresh */}
           <div className="flex items-center gap-2 pl-1">
             <span className="mono hidden text-[10px] text-muted sm:inline">
@@ -202,6 +218,12 @@ export default function ConsoleHeader({
           </div>
         </div>
       </div>
+
+      {/* Employee Report Card Modal */}
+      <EmployeeReportCard
+        isOpen={showReportCard}
+        onClose={() => setShowReportCard(false)}
+      />
     </header>
   );
 }
